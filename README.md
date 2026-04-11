@@ -4,72 +4,56 @@ SUPERFLUIDO Bunker è un gestionale web-based (ERP) full-stack progettato su mis
 
 ---
 
+## 📖 The Story: Concept & Value Proposition
 
+La gestione di un collettivo musicale oggi soffre di una frammentazione cronica: Google Drive per i file, WhatsApp per la comunicazione, Excel per il magazzino e diverse piattaforme esterne (spesso costose o limitate) per l'ascolto dei provini.
 
-### 📖 The Story: Concept & Value Proposition
-La gestione di un collettivo musicale o di un'etichetta indipendente richiede solitamente un ecosistema frammentato: Google Drive per i file, WhatsApp per la comunicazione, Excel per il magazzino e piattaforme esterne (spesso costose o limitate, come untitled.stream) per l'ascolto dei provini.
+**SUPERFLUIDO Bunker nasce per centralizzare l'intera operatività in un unico Hub privato.** A differenza di soluzioni "low-cost" o preconfezionate, questo tool permette:
+* **Workflow Unificato:** Sostituisce 4 o 5 applicazioni diverse, eliminando la dispersione dei dati.
+* **Cloud Audio Professionale:** Uno "Studio Hub" privato senza limiti di spazio (basato su Supabase Storage) dove le tracce sono organizzate per fasi reali di produzione (*Beat, Provini, Mix, Master*).
+* **Automazione Documentale:** Un agente AI che processa i dati degli artisti per generare istantaneamente Press Kit e Rider professionali.
 
-SUPERFLUIDO Bunker nasce per centralizzare tutto questo in un unico Hub privato e senza limiti.
-Il vero valore aggiunto del tool risiede nella sua natura ibrida: non è solo un gestionale, ma un vero e proprio ecosistema operativo.
+---
 
-Cloud Audio Illimitato e Strutturato: A differenza di servizi terzi con limiti di spazio o caricamento disordinato, lo Studio Hub permette di avere un proprio cloud personale su Supabase Storage. Ogni progetto (album/singolo) contiene le tracce organizzate per fase di lavorazione (Beat, Provini, Mix, Master). Questo permette a produttori e cantanti di avere sempre lo storico dell'evoluzione di una traccia in un unico posto.
+## 🧠 Engineering & Backend Architecture
 
-Automazione per il Live: Generare un Press-Kit o un Tech Rider richiede tempo. L'app integra un motore AI-based che, selezionando i membri presenti a un evento, compila un PDF ad hoc calcolando automaticamente le esigenze logistiche (es. tot bottiglie d'acqua in base ai membri) e recuperando le strumentazioni aggiornate di ciascun artista dal database.
+Sviluppare il "Bunker" ha significato progettare un'infrastruttura capace di gestire dati complessi e file binari pesanti in totale sicurezza.
 
-🧠 Engineering & Problem Solving
-Sviluppare un ERP su Streamlit ha richiesto di superare i limiti nativi del framework, progettato principalmente per dashboard di data science, per trasformarlo in una vera e propria Web App.
+### 1. Database Engineering & Real-Time CRUD
+Il cuore del progetto è l'integrazione con **Supabase (PostgreSQL)**. Non abbiamo solo "collegato" un database, abbiamo architettato un sistema di tabelle relazionali che permette un'operatività fluida direttamente dall'app:
+* **Operazioni Sincrone:** L'app gestisce flussi di *Crea-Sposta-Elimina* in tempo reale. Ogni azione sull'interfaccia si riflette istantaneamente sul DB cloud, garantendo l'integrità dei dati tra tutti i membri del collettivo.
+* **Data Persistence:** Grazie alla logica implementata nel backend Python, abbiamo eliminato la necessità di tool esterni di gestione: il Bunker agisce come interfaccia amministrativa professionale per l'intero database.
 
-1. UI/UX Overriding & State Management
-Per ottenere l'estetica "Dark Mode / Bunker" e un'esperienza utente fluida (simile a Spotify for Artists):
+### 2. Agente AI & Flussi Intelligenti
+Non abbiamo integrato una semplice chat, ma un **Agente funzionale** che opera sui dati:
+* **Dynamic PDF Engine:** L'agente recupera le biografie, le lineup e le specifiche tecniche (hospitality/tech rider) degli artisti dal database e, tramite il motore `FPDF2`, genera documenti pronti per il booking in frazioni di secondo.
+* **Analisi Logistica:** Calcolo automatico dei margini di profitto nel magazzino e alert intelligenti che monitorano lo stato dello stock, automatizzando processi che normalmente richiederebbero ore di data-entry manuale.
 
-CSS Injection: Ho effettuato un override chirurgico del CSS nativo di Streamlit. Ho rimosso l'header nativo, eliminato i padding eccessivi e forzato i layout centrali usando flexbox.
+### 3. Timezone Management & Data Integrity
+Per risolvere i problemi di sincronizzazione tra server Cloud (UTC) e operatività locale (Europe/Rome), è stato implementato un sistema di gestione delle Timezone tramite `zoneinfo`. Questo garantisce che ogni evento a calendario e ogni timestamp di modifica dei progetti sia matematicamente esatto, evitando conflitti di pianificazione.
 
-Image Zoom Disable: Per mantenere un aspetto professionale (es. nella pagina di Login), ho disabilitato il comportamento di default di Streamlit che permette l'espansione delle immagini, utilizzando regole CSS come pointer-events: none sui container delle immagini.
+### 4. Custom UI & System Branding
+Sebbene costruito su Streamlit, il Bunker è stato "hackerato" tramite CSS Injection massiccio per rimuovere il feeling da dashboard scientifica e trasformarlo in una Web App dal look Dark/Premium. Abbiamo disabilitato comportamenti nativi (zoom immagini, header standard) per proteggere la User Experience e mantenere un branding coerente con l'identità del collettivo.
 
-Session State: Navigazione senza ricaricamento pagina gestita interamente tramite st.session_state e streamlit-option-menu, garantendo persistenza dei dati durante l'uso (es. tenendo in memoria un audio in riproduzione mentre si consulta un'altra vista del progetto).
+---
 
-2. Timezone Hell & Data Integrity
-La gestione del calendario presentava un problema critico: i server Cloud (Supabase e Streamlit) operano in UTC, causando lo slittamento degli eventi serali (es. un live alle 22:30 a Roma) al giorno successivo a causa del fuso orario (+1/+2 ore).
+## ✨ Core Features Detail
 
-Soluzione: Ho implementato la libreria zoneinfo di Python per forzare l'hardcoding della timezone (Europe/Rome). Ogni stringa ISO recuperata dal database viene convertita esplicitamente prima del rendering su FullCalendar, garantendo precisione assoluta negli orari di inizio e fine evento.
+* **🎧 Studio Hub:** Gestione cloud completa per progetti audio con metadatazione per fase di sviluppo.
+* **🤖 Press-Kit Agent:** Motore di generazione documenti basato sui profili artisti sincronizzati.
+* **🗓️ Calendario Operativo:** Sistema di pianificazione eventi con doppia vista (Griglia/Lista) e gestione automatizzata dei fusi orari.
+* **📦 Merch ERP:** Modulo di inventario professionale con gestione varianti e tracciamento vendite/margini.
 
-3. Sicurezza, RBAC e Gestione Segreti
-L'app gestisce dati sensibili, file privati e scorte di magazzino.
+---
 
-Role-Based Access Control: Implementato un sistema di ruoli (Master vs Membro). Un membro può creare eventi o caricare tracce, ma solo il ruolo "Master" (o l'owner del record) ha l'autorizzazione per eseguire operazioni di DELETE sul database.
+## 🛠️ Tech Stack Completo
 
-Secrets Management: In fase di deploy su Streamlit Community Cloud, le chiavi API e gli URL del database sono stati rimossi dal codice sorgente (addio file .env) e migrati nel sistema blindato st.secrets, escludendo i file sensibili tramite .gitignore.
+* **Frontend:** Python 3, Streamlit (Custom CSS)
+* **Backend:** Supabase (PostgreSQL, Auth, Storage)
+* **Logic & Data:** Pandas, Plotly, ZoneInfo
+* **Document Automation:** FPDF2, UUID
 
-✨ Core Features Detail
-🎧 Studio Hub (Progetti Privati): Gestione cloud completa. Upload sicuro dei file .wav/.mp3 nel bucket Supabase, ascolto integrato tramite player nativo e metadatazione per fasi di sviluppo (Beat, Provini, Mix, Master).
-
-🤖 Press-Kit Generator & Vault: Utilizzo di FPDF2 per la generazione on-the-fly di documenti PDF. Il sistema incrocia le biografie e le schede tecniche degli artisti nel DB, genera il layout personalizzato e archivia una copia nel "Vault" cloud per il download futuro.
-
-🗓️ Calendario Sincronizzato: Implementazione di streamlit-calendar con CSS custom. Offre una classica visualizzazione a griglia mensile per la pianificazione e una comodissima Vista Promemoria stile iPhone per il check rapido degli impegni della settimana da mobile.
-
-📦 Gestione Magazzino (Merch): Modulo ERP per l'inventario. Gestisce prodotti, varianti multiple (es. taglie magliette) e calcola in tempo reale i margini di profitto (Prezzo Vendita - Costo Produzione). Include dashboard con Alert per le scorte in esaurimento.
-
-👤 Gestione Profili: Spazio personale dove ogni artista aggiorna la propria bio, i link social e la strumentazione live. Modificare un profilo qui aggiorna automaticamente i futuri Press-Kit generati.
-
-🧪 Testing & Deploy
-L'app ha superato diverse fasi di testing prima della release:
-
-UI Responsiveness: Test di adattabilità del CSS custom per schermi Desktop e Mobile (inclusa la centratura forzata del login box).
-
-Boundary Testing (Auth): Verifica dei limiti di sicurezza RBAC (tentativi di eliminazione incrociata tra account "membro").
-
-Storage I/O: Test di latenza e stabilità nell'upload/download di file audio pesanti verso Supabase Storage e generazione dinamica di link pubblici sicuri.
-
-CI/CD: Deploy continuo tramite repository GitHub collegato a Streamlit Cloud, con gestione automatica delle dipendenze via requirements.txt.
-
-🛠️ Tech Stack Completo
-Frontend: Python 3, Streamlit, Streamlit-Option-Menu, Streamlit-Calendar
-
-Backend & Database: Supabase (PostgreSQL, Supabase Auth, Supabase Storage Buckets)
-
-Data Visualization & Logic: Plotly (Grafici di tendenza), Pandas (Manipolazione dati di magazzino)
-
-Documenti & Utilities: FPDF2 (PDF Engine), Python zoneinfo (Timezone management), uuid (Gestione identificativi univoci per i file cloud)
+---
 
 ## 📸 Sneak Peek
 
@@ -86,6 +70,8 @@ Documenti & Utilities: FPDF2 (PDF Engine), Python zoneinfo (Timezone management)
   &nbsp;
   <img src="docs/press-kit.png" alt="Generatore Press Kit" width="31%">
 </div>
+
+---
 
 ## 🏗️ Architettura di Sistema
 
