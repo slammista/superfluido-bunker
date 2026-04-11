@@ -1,0 +1,19 @@
+.streamlit/secrets.toml
+
+# Ambiente virtuale Python
+venv/
+env/
+.env
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
