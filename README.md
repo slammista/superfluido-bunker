@@ -2,6 +2,24 @@
 
 SUPERFLUIDO Bunker è un gestionale web-based (ERP) full-stack progettato su misura per le esigenze di un collettivo musicale/etichetta indipendente. Centralizza la gestione del magazzino, l'organizzazione degli eventi live, l'archiviazione di progetti audio e la generazione automatizzata di Press Kit.
 
+---
+
+## 📸 Sneak Peek
+
+<div align="center">
+  <img src="docs/home_dashboard.png" alt="Home Dashboard" width="45%">
+  &nbsp;
+  <img src="docs/calendario.png" alt="Calendario Eventi" width="45%">
+</div>
+<br>
+<div align="center">
+  <img src="docs/studio_hub.png" alt="Studio Hub & Audio Player" width="45%">
+  &nbsp;
+  <img src="docs/magazzino.png" alt="Gestione Magazzino" width="45%">
+</div>
+
+---
+
 ## 🏗️ Architettura di Sistema
 
 ```mermaid
@@ -31,24 +49,3 @@ graph TD
         Features --> S[🎧 Studio Hub / Audio Player]
         Features --> V[🗃️ Vault Documenti]
     end
-✨ Core Features
-🔐 Role-Based Access Control (RBAC): Sistema di login con permessi differenziati (Master vs Membro) per proteggere le operazioni critiche di eliminazione dati.
-
-🗓️ Calendario Sincronizzato: Integrazione con FullCalendar. Gestione avanzata dei fusi orari (Timezone Europea fissa) per evitare slittamenti di date tra server UTC e client locali. Doppia vista (Griglia mensile e Lista Promemoria).
-
-📦 Gestione Magazzino (Merch): Sistema CRUD per inventario con gestione delle varianti (es. taglie). Calcolo automatico dei margini di profitto e alert dinamici per le scorte in esaurimento (sotto i 15 pezzi).
-
-🎧 Studio Hub (Progetti Privati): Interfaccia stile "Spotify for Artists". Caricamento diretto di file audio su Supabase Storage, player audio nativo integrato e tracciamento della fase del brano (Beat, Provini, Mix, Master).
-
-🤖 Press-Kit Generator: Motore basato su FPDF2 che compila dinamicamente un PDF professionale (Bio, Lineup, Tech Rider, Hospitality) incrociando i profili degli artisti selezionati dal database.
-
-💅 Custom UI/UX: Override massiccio del CSS nativo di Streamlit per ottenere un'estetica "Dark Mode / Bunker", navbar con effetto glassmorphism, disattivazione dinamica dello zoom sulle immagini e layout responsive centrati tramite container flessibili.
-
-🛠️ Tech Stack
-Frontend: Python, Streamlit, Streamlit-Option-Menu, Streamlit-Calendar
-
-Backend & Database: Supabase (PostgreSQL, Auth, Storage)
-
-Data Visualization: Plotly, Pandas
-
-Utility: FPDF2 (Generazione documenti), ZoneInfo (Gestione Timezone)
