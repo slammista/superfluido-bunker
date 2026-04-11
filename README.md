@@ -112,9 +112,7 @@ graph TD
         Features --> S[🎧 Studio Hub / Audio Player]
         Features --> V[🗃️ Vault Documenti]
     end
-```
 
----
 
 ## 📖 The Story: Concept & Value Proposition
 
