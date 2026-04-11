@@ -13,9 +13,11 @@ SUPERFLUIDO Bunker è un gestionale web-based (ERP) full-stack progettato su mis
 </div>
 <br>
 <div align="center">
-  <img src="docs/studio_hub.png" alt="Studio Hub & Audio Player" width="45%">
+  <img src="docs/studio_hub.png" alt="Studio Hub & Audio Player" width="31%">
   &nbsp;
-  <img src="docs/magazzino.png" alt="Gestione Magazzino" width="45%">
+  <img src="docs/magazzino.png" alt="Gestione Magazzino" width="31%">
+  &nbsp;
+  <img src="docs/alert_magazzino.png" alt="ALERT MAGAZZINO" width="31%">
 </div>
 
 ---
