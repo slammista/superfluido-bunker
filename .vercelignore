@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+node_modules
+.next
+.git
+SUPERFLUIDO_Bunker_Full_Manual.pdf
