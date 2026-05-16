@@ -1,16 +1,26 @@
-.streamlit/secrets.toml
+# dependencies
+node_modules/
 
-# Ambiente virtuale Python
+# next
+.next/
+out/
+
+# environment
+.env
+.env*.local
+
+# vercel
+.vercel/
+
+# legacy python/streamlit
+.streamlit/
 venv/
 env/
-.env
-
-# Cache Python
 __pycache__/
 *.pyc
 *.pyo
 
-# File di sistema
+# system
 .DS_Store
 Thumbs.db
 

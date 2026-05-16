@@ -1,53 +1,52 @@
-# 🎧 SUPERFLUIDO Bunker - Music Label ERP & Management Hub
+# SUPERFLUIDO Bunker
 
-SUPERFLUIDO Bunker è un gestionale web-based (ERP) full-stack progettato su misura per le esigenze di un collettivo musicale/etichetta indipendente. Centralizza la gestione del magazzino, l'organizzazione degli eventi live, l'archiviazione di progetti audio e la generazione automatizzata di Press Kit.
+ERP web per collettivi musicali, label indipendenti e studio hub. La vecchia app Streamlit e' stata sostituita da una UI moderna in Next.js, React, TypeScript e Tailwind CSS 4, pronta per deploy Vercel.
 
----
+## Stack
 
-## 📸 Sneak Peek
+- Next.js App Router
+- React + TypeScript
+- Tailwind CSS 4
+- Supabase Auth, Database e Storage
+- Groq API per il tool AI Press Kit
+- Vercel per build e deploy
 
-<div align="center">
-  <img src="docs/home.png" alt="Home Dashboard" width="45%">
-  &nbsp;
-  <img src="docs/calendario.png" alt="Calendario Eventi" width="45%">
-</div>
-<br>
-<div align="center">
-  <img src="docs/progetti.png" alt="Studio Hub & Audio Player" width="31%">
-  &nbsp;
-  <img src="docs/inventario.png" alt="Gestione Magazzino" width="31%">
-  &nbsp;
-  <img src="docs/press-kit.png" alt="ALERT MAGAZZINO" width="31%">
-</div>
+## Moduli
 
----
+- Overview operativa
+- Magazzino prodotti e varianti
+- Calendario eventi
+- Studio Hub per album e tracce
+- AI Press Kit con endpoint server `/api/ai`
+- Profili artisti
+- Vault documenti
 
-## 🏗️ Architettura di Sistema
+## Variabili ambiente
 
-```mermaid
-graph TD
-    Client[Browser Web / Mobile] -->|HTTPS| Frontend(Streamlit Frontend - Python)
-    
-    subgraph Streamlit Cloud Environment
-        Frontend
-        PDFGen[Generatore PDF - FPDF2]
-        DataViz[Dashboard DataViz - Plotly]
-    end
+Configura le variabili su `.env` in locale e su Vercel Project Settings:
 
-    Frontend <-->|Supabase Python Client| BaaS[Supabase Backend]
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
+```
 
-    subgraph Supabase Cloud
-        BaaS --> Auth[Autenticazione & Ruoli]
-        BaaS --> DB[(PostgreSQL Database)]
-        BaaS --> Storage[Storage Buckets]
-    end
+`GROQ_API_KEY` resta server-side e non viene esposta al browser.
 
-    DB -->|Tabelle Relazionali| Features
-    Storage -->|Audio .wav/.mp3 & Immagini| Features
+## Sviluppo
 
-    subgraph Moduli Core
-        Features --> C[🗓️ Calendario Condiviso]
-        Features --> M[📦 Magazzino & Varianti]
-        Features --> S[🎧 Studio Hub / Audio Player]
-        Features --> V[🗃️ Vault Documenti]
-    end
+```bash
+npm install
+npm run dev
+```
+
+## Build
+
+```bash
+npm run build
+```
+
+## Deploy Vercel
+
+Il progetto include `vercel.json` e viene rilevato come Next.js. Prima del deploy imposta su Vercel le stesse variabili ambiente indicate sopra.
