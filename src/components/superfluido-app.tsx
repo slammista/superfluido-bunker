@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Activity,
   AlertTriangle,
   Archive,
   Bot,
@@ -224,27 +223,27 @@ export function SuperfluidoApp() {
       <section className="mx-auto max-w-7xl px-4 py-6 lg:py-8">
         {notice ? <Notice text={notice} /> : null}
 
-        <Activity mode={view === "home" ? "visible" : "hidden"}>
+        <div className={view === "home" ? "" : "hidden"}>
           <Overview state={state} user={user} goTo={setView} />
-        </Activity>
-        <Activity mode={view === "inventory" ? "visible" : "hidden"}>
+        </div>
+        <div className={view === "inventory" ? "" : "hidden"}>
           <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} />
-        </Activity>
-        <Activity mode={view === "calendar" ? "visible" : "hidden"}>
+        </div>
+        <div className={view === "calendar" ? "" : "hidden"}>
           <CalendarModule events={state.events} user={user} reload={() => loadWorkspace(user.id)} />
-        </Activity>
-        <Activity mode={view === "projects" ? "visible" : "hidden"}>
+        </div>
+        <div className={view === "projects" ? "" : "hidden"}>
           <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} />
-        </Activity>
-        <Activity mode={view === "press" ? "visible" : "hidden"}>
+        </div>
+        <div className={view === "press" ? "" : "hidden"}>
           <PressKit state={state} />
-        </Activity>
-        <Activity mode={view === "profile" ? "visible" : "hidden"}>
+        </div>
+        <div className={view === "profile" ? "" : "hidden"}>
           <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} />
-        </Activity>
-        <Activity mode={view === "vault" ? "visible" : "hidden"}>
+        </div>
+        <div className={view === "vault" ? "" : "hidden"}>
           <Vault files={state.vault} user={user} reload={() => loadWorkspace(user.id)} />
-        </Activity>
+        </div>
       </section>
     </main>
   );
