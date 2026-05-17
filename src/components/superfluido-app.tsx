@@ -16,7 +16,10 @@ import {
   Home,
   Loader2,
   LogOut,
+  MoreHorizontal,
+  Music,
   Package,
+  Play,
   Plus,
   Search,
   Send,
@@ -72,7 +75,20 @@ const PRODUCT_CATEGORIES = ["Vestiario", "Supporto Fisico", "Merch", "Vinile", "
 // Fasi traccia allineate al CHECK constraint del DB
 const TRACK_PHASES = ["Beat", "Provini", "Demo", "Mix", "Master"] as const;
 
+// FIX 1: emptyState usa array vuoti
 const emptyState: AppState = {
+  products: [],
+  events: [],
+  albums: [],
+  tracks: [],
+  profiles: [],
+  vault: [],
+  folders: [],
+  tasks: [],
+};
+
+// FIX 1: sampleState con i sample data, usato solo nel catch del boot()
+const sampleState: AppState = {
   products: sampleProducts,
   events: sampleEvents,
   albums: sampleAlbums,
@@ -117,22 +133,48 @@ export function SuperfluidoApp() {
           await loadWorkspace(appUser.id);
         }
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "Supabase non configurato. Uso dati demo.");
+        // FIX 1: usa sampleState nel catch
+        if (mounted) {
+          setNotice(error instanceof Error ? error.message : "Supabase non configurato. Uso dati demo.");
+          setState(sampleState);
+        }
       } finally {
         if (mounted) setLoading(false);
       }
     }
 
     boot();
-    return () => { mounted = false; };
+
+    // FIX 1: onAuthStateChange listener
+    const supabase = getSupabase();
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        if (mounted) {
+          setUser(null);
+          setState(emptyState);
+          setView("home");
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
-  async function fetchRole(userId: string) {
-    const supabase = getSupabase();
-    const { data } = await supabase.from("user_roles").select("role").eq("id", userId).maybeSingle();
-    return data?.role as Role | undefined;
+  // FIX 1 + FIX 2: fetchRole wrappato in try-catch
+  async function fetchRole(userId: string): Promise<Role | undefined> {
+    try {
+      const supabase = getSupabase();
+      const { data } = await supabase.from("user_roles").select("role").eq("id", userId).maybeSingle();
+      return data?.role as Role | undefined;
+    } catch {
+      return undefined;
+    }
   }
 
+  // FIX 1: loadWorkspace senza fallback a sample data, senza filtro caricato_da sulle tracce
   async function loadWorkspace(userId: string) {
     const supabase = getSupabase();
 
@@ -140,20 +182,23 @@ export function SuperfluidoApp() {
       supabase.from("products").select("*, product_variants(*)"),
       supabase.from("eventi_calendario").select("*").order("data_evento"),
       supabase.from("album_progetti").select("*").order("created_at", { ascending: false }),
-      supabase.from("tracce_audio").select("*, album_progetti(id, nome_album)").eq("caricato_da", userId),
+      supabase.from("tracce_audio").select("*, album_progetti(id, nome_album)"),
       supabase.from("profili_artisti").select("*"),
       supabase.from("vault_documenti").select("*").order("created_at", { ascending: false }),
       supabase.from("vault_cartelle").select("*").order("created_at"),
       supabase.from("tasks_kanban").select("*").order("created_at"),
     ]);
 
+    // Suppress unused variable warning
+    void userId;
+
     setState({
-      products: products.data?.length ? (products.data as Product[]) : sampleProducts,
-      events: events.data?.length ? (events.data as CalendarEvent[]) : sampleEvents,
-      albums: albums.data?.length ? (albums.data as Album[]) : sampleAlbums,
-      tracks: tracks.data?.length ? (tracks.data as Track[]) : sampleTracks,
-      profiles: profiles.data?.length ? (profiles.data as ArtistProfile[]) : sampleProfiles,
-      vault: vault.data?.length ? (vault.data as VaultFile[]) : sampleVault,
+      products: (products.data ?? []) as Product[],
+      events: (events.data ?? []) as CalendarEvent[],
+      albums: (albums.data ?? []) as Album[],
+      tracks: (tracks.data ?? []) as Track[],
+      profiles: (profiles.data ?? []) as ArtistProfile[],
+      vault: (vault.data ?? []) as VaultFile[],
       folders: (folders.data ?? []) as VaultFolder[],
       tasks: (tasks.data ?? []) as KanbanTask[],
     });
@@ -178,6 +223,35 @@ export function SuperfluidoApp() {
     }
   }
 
+  // FIX 2: handleSignup
+  async function handleSignup(email: string, password: string) {
+    setLoading(true);
+    setNotice(null);
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+      if (!data.user) throw new Error("Registrazione non riuscita.");
+
+      // Inserisci in user_roles con ruolo membro
+      await supabase.from("user_roles").insert({ id: data.user.id, role: "membro" });
+
+      if (data.session) {
+        // Auto-login se la sessione è disponibile
+        const role = await fetchRole(data.user.id);
+        const appUser = { id: data.user.id, email: data.user.email ?? email, role: role ?? "membro" };
+        setUser(appUser);
+        await loadWorkspace(appUser.id);
+      } else {
+        setNotice("Account creato! Controlla la tua email.");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Errore durante la registrazione.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleLogout() {
     try {
       await getSupabase().auth.signOut();
@@ -189,7 +263,8 @@ export function SuperfluidoApp() {
   }
 
   if (!user) {
-    return <LoginScreen loading={loading} notice={notice} onLogin={handleLogin} />;
+    // FIX 2: passa onSignup a LoginScreen
+    return <LoginScreen loading={loading} notice={notice} onLogin={handleLogin} onSignup={handleSignup} />;
   }
 
   return (
@@ -271,7 +346,8 @@ export function SuperfluidoApp() {
           <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "press" ? "" : "hidden"}>
-          <PressKit state={state} />
+          {/* FIX 5: passa user e onToast a PressKit */}
+          <PressKit state={state} user={user} onToast={showToast} />
         </div>
         <div className={view === "profile" ? "" : "hidden"}>
           <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
@@ -287,21 +363,29 @@ export function SuperfluidoApp() {
   );
 }
 
+// FIX 2: LoginScreen con toggle login/signup
 function LoginScreen({
   loading,
   notice,
   onLogin,
+  onSignup,
 }: {
   loading: boolean;
   notice: string | null;
   onLogin: (email: string, password: string) => Promise<void>;
+  onSignup: (email: string, password: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"login" | "signup">("login");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await onLogin(email, password);
+    if (mode === "login") {
+      await onLogin(email, password);
+    } else {
+      await onSignup(email, password);
+    }
   }
 
   return (
@@ -313,8 +397,14 @@ function LoginScreen({
         <div className="mx-auto mb-8 h-28 w-52">
           <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-full w-full object-contain" priority />
         </div>
-        <h1 className="text-center text-2xl font-black tracking-tight text-white">Bunker Login</h1>
-        <p className="mt-2 text-center text-sm text-white/55">Accesso operativo a magazzino, studio, calendario e AI press kit.</p>
+        <h1 className="text-center text-2xl font-black tracking-tight text-white">
+          {mode === "login" ? "Bunker Login" : "Crea Account"}
+        </h1>
+        <p className="mt-2 text-center text-sm text-white/55">
+          {mode === "login"
+            ? "Accesso operativo a magazzino, studio, calendario e AI press kit."
+            : "Crea il tuo account per accedere al Bunker."}
+        </p>
 
         {notice ? <Notice text={notice} /> : null}
 
@@ -329,8 +419,28 @@ function LoginScreen({
           className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
-          Entra
+          {mode === "login" ? "Entra" : "Crea Account"}
         </button>
+
+        <div className="mt-5 text-center">
+          {mode === "login" ? (
+            <button
+              type="button"
+              onClick={() => setMode("signup")}
+              className="text-sm text-white/50 transition hover:text-orange-300"
+            >
+              Non hai un account? <span className="font-bold text-orange-400">Registrati</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setMode("login")}
+              className="text-sm text-white/50 transition hover:text-orange-300"
+            >
+              Hai già un account? <span className="font-bold text-orange-400">Accedi</span>
+            </button>
+          )}
+        </div>
       </form>
     </main>
   );
@@ -370,7 +480,8 @@ function Notice({ text }: { text: string }) {
   );
 }
 
-function ModuleHeader({ title, text, icon: Icon }: { title: string; text: string; icon: typeof Home }) {
+// FIX 4: ModuleHeader con prop opzionale actions
+function ModuleHeader({ title, text, icon: Icon, actions }: { title: string; text: string; icon: typeof Home; actions?: React.ReactNode }) {
   return (
     <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
       <div>
@@ -380,6 +491,11 @@ function ModuleHeader({ title, text, icon: Icon }: { title: string; text: string
         <h2 className="text-3xl font-black tracking-tight text-white md:text-5xl">{title}</h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-white/56">{text}</p>
       </div>
+      {actions && (
+        <div className="flex shrink-0 items-center gap-2">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }
@@ -561,8 +677,73 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
   );
 }
 
+// FIX 3: CalendarModule con vista mensile
 function CalendarModule({ events, user, reload, onToast }: { events: CalendarEvent[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [saving, setSaving] = useState(false);
+  const [calView, setCalView] = useState<"list" | "month">("list");
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth()); // 0-indexed
+  const [popoverEvent, setPopoverEvent] = useState<CalendarEvent | null>(null);
+
+  const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+  const GIORNI_HEADER = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+
+  function prevMonth() {
+    if (calMonth === 0) {
+      setCalMonth(11);
+      setCalYear((y) => y - 1);
+    } else {
+      setCalMonth((m) => m - 1);
+    }
+  }
+
+  function nextMonth() {
+    if (calMonth === 11) {
+      setCalMonth(0);
+      setCalYear((y) => y + 1);
+    } else {
+      setCalMonth((m) => m + 1);
+    }
+  }
+
+  // Griglia 6x7, partendo da Lunedì
+  const monthCells = useMemo(() => {
+    const firstDay = new Date(calYear, calMonth, 1);
+    // getDay() 0=Dom, ma vogliamo partire da Lun (1)
+    let startDow = firstDay.getDay(); // 0=Dom
+    // Converti: Dom=0 -> 6, Lun=1->0, ..., Sab=6->5
+    startDow = startDow === 0 ? 6 : startDow - 1;
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    const cells: { day: number; inMonth: boolean }[] = [];
+
+    // Giorni del mese precedente
+    const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
+    for (let i = startDow - 1; i >= 0; i--) {
+      cells.push({ day: prevMonthDays - i, inMonth: false });
+    }
+    // Giorni del mese corrente
+    for (let d = 1; d <= daysInMonth; d++) {
+      cells.push({ day: d, inMonth: true });
+    }
+    // Giorni del mese successivo per completare a 42
+    let nextDay = 1;
+    while (cells.length < 42) {
+      cells.push({ day: nextDay++, inMonth: false });
+    }
+    return cells;
+  }, [calYear, calMonth]);
+
+  function getEventsForDay(day: number): CalendarEvent[] {
+    return events.filter((ev) => {
+      const d = new Date(ev.data_evento);
+      return d.getFullYear() === calYear && d.getMonth() === calMonth && d.getDate() === day;
+    });
+  }
+
+  function isToday(day: number): boolean {
+    const today = new Date();
+    return today.getFullYear() === calYear && today.getMonth() === calMonth && today.getDate() === day;
+  }
 
   async function createEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -611,12 +792,119 @@ function CalendarModule({ events, user, reload, onToast }: { events: CalendarEve
       return;
     }
     onToast("Evento eliminato.", "success");
+    setPopoverEvent(null);
     await reload();
   }
 
   return (
     <>
       <ModuleHeader title="Calendario" text="Vista eventi condivisa per live, release, interviste e sessioni studio." icon={CalendarDays} />
+
+      {/* Toggle Lista / Mensile */}
+      <div className="mb-5 flex items-center gap-2">
+        <button
+          onClick={() => setCalView("list")}
+          className={`rounded-md px-4 py-2 text-sm font-bold transition ${calView === "list" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          Lista
+        </button>
+        <button
+          onClick={() => setCalView("month")}
+          className={`rounded-md px-4 py-2 text-sm font-bold transition ${calView === "month" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          Mensile
+        </button>
+      </div>
+
+      {calView === "month" ? (
+        <div className="glass mb-5 rounded-md p-5">
+          {/* Navigazione mese */}
+          <div className="mb-4 flex items-center justify-between">
+            <button onClick={prevMonth} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-white/60 hover:text-white">
+              <ChevronLeft size={18} />
+            </button>
+            <p className="font-black text-white">{MESI[calMonth]} {calYear}</p>
+            <button onClick={nextMonth} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-white/60 hover:text-white">
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          {/* Header giorni */}
+          <div className="mb-2 grid grid-cols-7 gap-1">
+            {GIORNI_HEADER.map((g) => (
+              <div key={g} className="py-1 text-center text-[11px] font-bold uppercase tracking-widest text-white/30">{g}</div>
+            ))}
+          </div>
+
+          {/* Griglia giorni */}
+          <div className="grid grid-cols-7 gap-1">
+            {monthCells.map((cell, idx) => {
+              const dayEvents = cell.inMonth ? getEventsForDay(cell.day) : [];
+              const todayCell = cell.inMonth && isToday(cell.day);
+              return (
+                <div
+                  key={idx}
+                  className={`min-h-[80px] rounded-md border p-1 ${cell.inMonth ? "border-white/10 bg-white/[0.025]" : "border-white/5 bg-transparent opacity-40"}`}
+                >
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                      todayCell ? "bg-orange-500 text-black" : "text-white/55"
+                    }`}
+                  >
+                    {cell.day}
+                  </span>
+                  <div className="mt-1 space-y-0.5">
+                    {dayEvents.slice(0, 2).map((ev) => (
+                      <button
+                        key={ev.id}
+                        onClick={() => setPopoverEvent(ev)}
+                        className="flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[10px] font-semibold text-white/80 hover:bg-white/10"
+                      >
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: ev.colore ?? "#ff6b35" }} />
+                        <span className="truncate">{ev.titolo}</span>
+                      </button>
+                    ))}
+                    {dayEvents.length > 2 && (
+                      <p className="px-1 text-[10px] text-white/35">+{dayEvents.length - 2} altri</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Popover evento */}
+      {popoverEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setPopoverEvent(null)}>
+          <div className="glass w-full max-w-sm rounded-md p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 h-1 rounded-full" style={{ background: popoverEvent.colore ?? "#ff6b35" }} />
+            <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-white/42">{popoverEvent.tipo_evento}</p>
+            <h3 className="mt-2 text-xl font-black text-white">{popoverEvent.titolo}</h3>
+            <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(popoverEvent.data_evento)}</p>
+            {popoverEvent.luogo && <p className="mt-1 text-sm text-white/55">{popoverEvent.luogo}</p>}
+            {popoverEvent.note && <p className="mt-3 text-sm leading-6 text-white/60">{popoverEvent.note}</p>}
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                onClick={() => deleteEvent(popoverEvent.id)}
+                className="inline-flex items-center gap-2 rounded-md border border-red-400/25 px-3 py-2 text-sm text-red-200 hover:bg-red-500/10"
+              >
+                <Trash2 size={14} />
+                Elimina
+              </button>
+              <button
+                onClick={() => setPopoverEvent(null)}
+                className="ml-auto inline-flex items-center gap-2 rounded-md border border-white/10 px-3 py-2 text-sm text-white/60 hover:text-white"
+              >
+                <X size={14} />
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <div className="glass rounded-md p-5">
           {events.length === 0 ? (
@@ -661,9 +949,33 @@ function CalendarModule({ events, user, reload, onToast }: { events: CalendarEve
   );
 }
 
+// FIX 4: Helper albumGradient - palette deterministica sull'id
+function albumGradient(id: string | number): string {
+  const palettes = [
+    "from-purple-900 to-orange-800",
+    "from-blue-900 to-indigo-700",
+    "from-emerald-900 to-teal-700",
+    "from-rose-900 to-pink-700",
+    "from-amber-900 to-yellow-700",
+    "from-cyan-900 to-sky-700",
+    "from-fuchsia-900 to-purple-700",
+    "from-red-900 to-orange-700",
+  ];
+  const str = String(id);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff;
+  }
+  return palettes[Math.abs(hash) % palettes.length];
+}
+
+// FIX 4: Projects completamente riscritto con griglia album
 function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; tracks: Track[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
-  const [uploadingTrack, setUploadingTrack] = useState(false);
+  const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
+  const [showAlbumForm, setShowAlbumForm] = useState(false);
+  const [showTrackForm, setShowTrackForm] = useState(false);
   const [savingAlbum, setSavingAlbum] = useState(false);
+  const [uploadingTrack, setUploadingTrack] = useState(false);
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -689,13 +1001,31 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
 
       onToast("Album creato.", "success");
       (event.target as HTMLFormElement).reset();
+      setShowAlbumForm(false);
       await reload();
     } finally {
       setSavingAlbum(false);
     }
   }
 
-  async function addTrack(event: FormEvent<HTMLFormElement>) {
+  async function deleteAlbum(album: Album) {
+    const albumTracks = tracks.filter((t) => t.album_id === album.id);
+    const confirmed = window.confirm(
+      `Eliminare l'album "${album.nome_album}"? Contiene ${albumTracks.length} tracce. Le tracce verranno de-associate.`
+    );
+    if (!confirmed) return;
+
+    const { error } = await getSupabase().from("album_progetti").delete().eq("id", album.id);
+    if (error) {
+      onToast(`Errore eliminazione album: ${error.message}`);
+      return;
+    }
+    onToast("Album eliminato.", "success");
+    setSelectedAlbum(null);
+    await reload();
+  }
+
+  async function addTrack(event: FormEvent<HTMLFormElement>, albumId: string | number | null) {
     event.preventDefault();
     setUploadingTrack(true);
     try {
@@ -725,7 +1055,7 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
 
       const { error } = await supabase.from("tracce_audio").insert({
         caricato_da: user.id,
-        album_id: form.get("album_id") || null,
+        album_id: albumId,
         nome_traccia,
         fase: form.get("fase"),
         audio_file_url,
@@ -738,87 +1068,303 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
 
       onToast("Traccia aggiunta.", "success");
       (event.target as HTMLFormElement).reset();
+      setShowTrackForm(false);
       await reload();
     } finally {
       setUploadingTrack(false);
     }
   }
 
-  return (
-    <>
-      <ModuleHeader title="Studio Hub" text="Album, tracce, fasi di produzione e player per gli asset audio caricati su Supabase Storage." icon={Disc3} />
-      <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
-        <div className="flex flex-col gap-5">
-          <form onSubmit={createAlbum} className="glass rounded-md p-5">
-            <p className="text-lg font-black text-white">Album workspace</p>
-            <Input name="album" label="Nome album" required />
-            <ActionButton icon={Plus} text="Crea album" loading={savingAlbum} />
-            <div className="mt-6 space-y-3">
-              {albums.map((album) => (
-                <div key={album.id} className="rounded-md border border-white/10 bg-white/[0.04] p-3">
-                  <p className="font-bold text-white">{album.nome_album}</p>
-                </div>
-              ))}
-            </div>
-          </form>
+  async function deleteTrack(track: Track) {
+    const confirmed = window.confirm(`Eliminare la traccia "${track.nome_traccia}"?`);
+    if (!confirmed) return;
 
-          <form onSubmit={addTrack} className="glass rounded-md p-5">
-            <p className="text-lg font-black text-white">Aggiungi traccia</p>
-            <Input name="nome_traccia" label="Nome traccia" required />
-            <Select name="fase" label="Fase" options={TRACK_PHASES} />
-            <label className="mt-4 block">
-              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">Album</span>
-              <select name="album_id" className="field mt-2 rounded-md px-3 py-2.5 text-sm">
-                <option value="" className="bg-neutral-950">Nessun album</option>
-                {albums.map((album) => (
-                  <option key={album.id} value={album.id} className="bg-neutral-950">{album.nome_album}</option>
-                ))}
-              </select>
-            </label>
+    const supabase = getSupabase();
+
+    // Tenta di eliminare da storage se l'URL è disponibile
+    if (track.audio_file_url) {
+      try {
+        const url = new URL(track.audio_file_url);
+        const pathParts = url.pathname.split("/audio/");
+        if (pathParts.length > 1) {
+          await supabase.storage.from("audio").remove([pathParts[1]]);
+        }
+      } catch {
+        // Ignora errori di parsing URL
+      }
+    }
+
+    const { error } = await supabase.from("tracce_audio").delete().eq("id", track.id);
+    if (error) {
+      onToast(`Errore eliminazione traccia: ${error.message}`);
+      return;
+    }
+    onToast("Traccia eliminata.", "success");
+    await reload();
+  }
+
+  async function updateTrackPhase(trackId: string | number, fase: string) {
+    const { error } = await getSupabase().from("tracce_audio").update({ fase }).eq("id", trackId);
+    if (error) {
+      onToast(`Errore aggiornamento fase: ${error.message}`);
+    } else {
+      await reload();
+    }
+  }
+
+  const unassignedTracks = tracks.filter((t) => !t.album_id);
+  const albumTracks = selectedAlbum ? tracks.filter((t) => t.album_id === selectedAlbum.id) : [];
+
+  // Vista dettaglio album
+  if (selectedAlbum !== null) {
+    return (
+      <>
+        <ModuleHeader
+          title="Studio Hub"
+          text="Album, tracce, fasi di produzione e player per gli asset audio caricati su Supabase Storage."
+          icon={Disc3}
+          actions={
+            <button
+              onClick={() => setSelectedAlbum(null)}
+              className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-bold text-white/70 transition hover:text-white"
+            >
+              <ChevronLeft size={15} />
+              Torna agli album
+            </button>
+          }
+        />
+
+        {/* Header album */}
+        <div className="glass mb-5 flex flex-col gap-5 rounded-md p-5 sm:flex-row sm:items-center">
+          <div className={`h-24 w-24 shrink-0 overflow-hidden rounded-md bg-gradient-to-br ${albumGradient(selectedAlbum.id)} flex items-center justify-center`}>
+            {selectedAlbum.cover_image_url ? (
+              <Image src={selectedAlbum.cover_image_url} alt={selectedAlbum.nome_album} width={96} height={96} className="h-full w-full object-cover" />
+            ) : (
+              <Music size={32} className="text-white/40" />
+            )}
+          </div>
+          <div className="flex-1">
+            <h3 className="text-2xl font-black text-white">{selectedAlbum.nome_album}</h3>
+            <p className="mt-1 text-sm text-white/50">{albumTracks.length} tracce</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowTrackForm(!showTrackForm)}
+              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-3 py-2 text-sm font-black text-black transition hover:bg-orange-300"
+            >
+              <Plus size={15} />
+              Aggiungi traccia
+            </button>
+            <button
+              onClick={() => deleteAlbum(selectedAlbum)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
+              title="Elimina album"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        </div>
+
+        {/* Form aggiungi traccia */}
+        {showTrackForm && (
+          <form onSubmit={(e) => addTrack(e, selectedAlbum.id)} className="glass mb-5 rounded-md p-5">
+            <p className="mb-4 font-black text-white">Nuova traccia in "{selectedAlbum.nome_album}"</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input name="nome_traccia" label="Nome traccia" required />
+              <Select name="fase" label="Fase" options={TRACK_PHASES} />
+            </div>
             <label className="mt-4 block">
               <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File audio</span>
               <input type="file" accept="audio/*" className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
             </label>
-            <button disabled={uploadingTrack} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
-              {uploadingTrack ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
-              Aggiungi traccia
-            </button>
+            <div className="mt-4 flex gap-3">
+              <ActionButton icon={UploadCloud} text="Aggiungi traccia" loading={uploadingTrack} />
+              <button type="button" onClick={() => setShowTrackForm(false)} className="mt-5 inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-3 text-sm font-bold text-white/60 hover:text-white">
+                Annulla
+              </button>
+            </div>
           </form>
-        </div>
+        )}
 
+        {/* Tabella tracce */}
         <div className="glass rounded-md p-5">
-          {tracks.length === 0 ? (
-            <p className="py-10 text-center text-sm text-white/40">Nessuna traccia caricata.</p>
+          {albumTracks.length === 0 ? (
+            <p className="py-10 text-center text-sm text-white/40">Nessuna traccia in questo album.</p>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {tracks.map((track) => (
-                <article key={track.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200">{track.fase || "Demo"}</p>
-                      <h3 className="mt-2 text-xl font-black text-white">{track.nome_traccia}</h3>
-                      <p className="mt-1 text-sm text-white/45">{track.album_progetti?.nome_album || "Album non assegnato"}</p>
-                    </div>
-                    <FileAudio className="text-white/25" />
-                  </div>
-                  {track.audio_file_url
-                    ? <audio className="mt-4 w-full" controls src={track.audio_file_url} />
-                    : <div className="mt-4 h-10 rounded-md border border-dashed border-white/12 text-center text-xs leading-10 text-white/35">Audio non caricato</div>
-                  }
-                </article>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead className="text-xs uppercase tracking-[0.14em] text-white/35">
+                  <tr>
+                    <th className="border-b border-white/10 py-3 text-left">#</th>
+                    <th className="border-b border-white/10 py-3 text-left">Traccia</th>
+                    <th className="border-b border-white/10 py-3 text-left">Fase</th>
+                    <th className="border-b border-white/10 py-3 text-right"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {albumTracks.map((track, idx) => (
+                    <tr key={track.id} className="border-b border-white/7">
+                      <td className="py-4 font-mono text-white/40">{idx + 1}</td>
+                      <td className="py-4">
+                        <p className="font-bold text-white">{track.nome_traccia}</p>
+                        {track.audio_file_url ? (
+                          <audio className="mt-2 h-8 w-full" controls src={track.audio_file_url} />
+                        ) : (
+                          <p className="mt-1 text-xs text-white/30">Audio non caricato</p>
+                        )}
+                      </td>
+                      <td className="py-4">
+                        <select
+                          value={track.fase || "Demo"}
+                          onChange={(e) => updateTrackPhase(track.id, e.target.value)}
+                          className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-xs text-white"
+                        >
+                          {TRACK_PHASES.map((f) => <option key={f} value={f} className="bg-neutral-950">{f}</option>)}
+                        </select>
+                      </td>
+                      <td className="py-4 text-right">
+                        <button onClick={() => deleteTrack(track)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10">
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-      </div>
+      </>
+    );
+  }
+
+  // Vista griglia album
+  return (
+    <>
+      <ModuleHeader
+        title="Studio Hub"
+        text="Album, tracce, fasi di produzione e player per gli asset audio caricati su Supabase Storage."
+        icon={Disc3}
+        actions={
+          <button
+            onClick={() => setShowAlbumForm(!showAlbumForm)}
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-black transition hover:bg-orange-300"
+          >
+            <Plus size={15} />
+            Nuovo album
+          </button>
+        }
+      />
+
+      {/* Form crea album */}
+      {showAlbumForm && (
+        <form onSubmit={createAlbum} className="glass mb-5 rounded-md p-5">
+          <p className="mb-4 font-black text-white">Nuovo album</p>
+          <div className="flex gap-3">
+            <Input name="album" label="Nome album" required className="flex-1" />
+          </div>
+          <div className="mt-4 flex gap-3">
+            <ActionButton icon={Plus} text="Crea album" loading={savingAlbum} />
+            <button type="button" onClick={() => setShowAlbumForm(false)} className="mt-5 inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-3 text-sm font-bold text-white/60 hover:text-white">
+              Annulla
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Griglia album */}
+      {albums.length === 0 ? (
+        <div className="glass rounded-md p-10 text-center">
+          <Music size={36} className="mx-auto mb-4 text-white/20" />
+          <p className="text-sm text-white/40">Nessun album creato. Comincia creando il primo progetto.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {albums.map((album) => {
+            const count = tracks.filter((t) => t.album_id === album.id).length;
+            return (
+              <button
+                key={album.id}
+                onClick={() => setSelectedAlbum(album)}
+                className="glass group overflow-hidden rounded-md text-left transition hover:border-orange-400/30"
+              >
+                <div className={`relative h-40 bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
+                  {album.cover_image_url ? (
+                    <Image src={album.cover_image_url} alt={album.nome_album} fill className="object-cover" />
+                  ) : (
+                    <Music size={40} className="text-white/20" />
+                  )}
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
+                    <span className="rounded-full bg-black/60 p-3">
+                      <Play size={20} className="text-white" fill="white" />
+                    </span>
+                  </div>
+                </div>
+                <div className="p-4">
+                  <p className="font-black text-white">{album.nome_album}</p>
+                  <p className="mt-1 text-xs text-white/45">{count} {count === 1 ? "traccia" : "tracce"}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Tracce non assegnate */}
+      {unassignedTracks.length > 0 && (
+        <div className="glass mt-6 rounded-md p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <MoreHorizontal size={18} className="text-white/40" />
+            <p className="font-bold text-white/70">Tracce non assegnate</p>
+            <span className="ml-auto font-mono text-xs text-white/30">{unassignedTracks.length}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead className="text-xs uppercase tracking-[0.14em] text-white/35">
+                <tr>
+                  <th className="border-b border-white/10 py-2 text-left">#</th>
+                  <th className="border-b border-white/10 py-2 text-left">Nome</th>
+                  <th className="border-b border-white/10 py-2 text-left">Fase</th>
+                  <th className="border-b border-white/10 py-2 text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {unassignedTracks.map((track, idx) => (
+                  <tr key={track.id} className="border-b border-white/7">
+                    <td className="py-3 font-mono text-white/40">{idx + 1}</td>
+                    <td className="py-3 font-bold text-white">{track.nome_traccia}</td>
+                    <td className="py-3">
+                      <select
+                        value={track.fase || "Demo"}
+                        onChange={(e) => updateTrackPhase(track.id, e.target.value)}
+                        className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-xs text-white"
+                      >
+                        {TRACK_PHASES.map((f) => <option key={f} value={f} className="bg-neutral-950">{f}</option>)}
+                      </select>
+                    </td>
+                    <td className="py-3 text-right">
+                      <button onClick={() => deleteTrack(track)} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10">
+                        <Trash2 size={12} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-function PressKit({ state }: { state: AppState }) {
+// FIX 5: PressKit con download .txt e salvataggio nel vault
+function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [prompt, setPrompt] = useState("Genera un press kit sintetico per la prossima release, includendo bio, pitch editoriale, punti forza e caption social.");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
+  const [savingToVault, setSavingToVault] = useState(false);
+
   const context = useMemo(
     () => ({
       profiles: state.profiles,
@@ -848,6 +1394,65 @@ function PressKit({ state }: { state: AppState }) {
     }
   }
 
+  function downloadTxt() {
+    const today = new Date();
+    const dateStr = today.toISOString().split("T")[0];
+    const blob = new Blob([answer], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `press-kit-${dateStr}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function saveToVault() {
+    setSavingToVault(true);
+    try {
+      const today = new Date();
+      const dateStr = today.toISOString().split("T")[0];
+      const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(":", "");
+      const filePath = `press-kit/press-kit-${dateTimeStr}.txt`;
+
+      const blob = new Blob([answer], { type: "text/plain;charset=utf-8" });
+      const supabase = getSupabase();
+
+      const { error: storageError } = await supabase.storage.from("vault").upload(filePath, blob, {
+        contentType: "text/plain",
+        upsert: true,
+      });
+
+      if (storageError) {
+        onToast(`Errore upload vault: ${storageError.message}`);
+        return;
+      }
+
+      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+
+      // Formatta data italiana DD/MM/YYYY
+      const [year, month, day] = dateStr.split("-");
+      const italianDate = `${day}/${month}/${year}`;
+
+      const { error: dbError } = await supabase.from("vault_documenti").insert({
+        nome_file: `Press Kit ${italianDate}`,
+        cartella: "Press",
+        file_url: urlData.publicUrl,
+        caricato_da: user.id,
+      });
+
+      if (dbError) {
+        onToast(`Errore salvataggio vault: ${dbError.message}`);
+        return;
+      }
+
+      onToast("Press Kit salvato nel Vault.", "success");
+    } finally {
+      setSavingToVault(false);
+    }
+  }
+
   return (
     <>
       <ModuleHeader title="AI Press Kit" text="Generazione reale via Groq, compatibile con il formato OpenAI Chat Completions e isolata lato server." icon={Bot} />
@@ -870,6 +1475,27 @@ function PressKit({ state }: { state: AppState }) {
             <Sparkles size={18} className="text-orange-300" />
           </div>
           <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-white/75">{answer || "L'output generato apparirà qui."}</pre>
+
+          {/* FIX 5: Bottoni download e salva nel vault */}
+          {answer !== "" && (
+            <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-5">
+              <button
+                onClick={downloadTxt}
+                className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-white/10"
+              >
+                <Download size={15} />
+                Scarica .txt
+              </button>
+              <button
+                onClick={saveToVault}
+                disabled={savingToVault}
+                className="inline-flex items-center gap-2 rounded-md border border-orange-400/30 bg-orange-500/10 px-4 py-2.5 text-sm font-bold text-orange-200 transition hover:bg-orange-500/20 disabled:opacity-60"
+              >
+                {savingToVault ? <Loader2 size={15} className="animate-spin" /> : <Archive size={15} />}
+                Salva nel Vault
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>
