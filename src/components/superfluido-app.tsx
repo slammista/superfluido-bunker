@@ -14,13 +14,16 @@ import {
   FileAudio,
   FolderOpen,
   Home,
+  List,
   Loader2,
   LogOut,
   MoreHorizontal,
   Music,
   Package,
+  Pencil,
   Play,
   Plus,
+  Save,
   Search,
   Send,
   Sparkles,
@@ -578,6 +581,8 @@ function Metric({ title, value, tone }: { title: string; value: string; tone: "o
 function Inventory({ products, user, reload, onToast }: { products: Product[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [updatingProduct, setUpdatingProduct] = useState(false);
   const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
 
   async function addProduct(event: FormEvent<HTMLFormElement>) {
@@ -588,45 +593,101 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
       const name = String(data.get("name") ?? "").trim();
       const category = String(data.get("category") ?? "Altro");
       const stock = Number(data.get("stock") ?? 0);
-
-      if (!name) {
-        onToast("Inserisci un nome per il prodotto.");
-        return;
-      }
-
+      if (!name) { onToast("Inserisci un nome per il prodotto."); return; }
       const supabase = getSupabase();
-      const { data: created, error } = await supabase
-        .from("products")
-        .insert({ name, category, base_price_sell: Number(data.get("price") ?? 0), base_price_cost: 0 })
-        .select()
-        .single();
-
-      if (error) {
-        onToast(`Errore prodotto: ${error.message}`);
-        return;
-      }
-
-      const { error: variantError } = await supabase.from("product_variants").insert({
-        product_id: created.id,
-        variant_name: "Default",
-        stock_quantity: stock,
-      });
-
-      if (variantError) {
-        onToast(`Prodotto creato ma errore variante: ${variantError.message}`);
-      } else {
-        onToast("Prodotto aggiunto.", "success");
-        (event.target as HTMLFormElement).reset();
-      }
+      const { data: created, error } = await supabase.from("products").insert({ name, category, base_price_sell: Number(data.get("price") ?? 0), base_price_cost: 0 }).select().single();
+      if (error) { onToast(`Errore prodotto: ${error.message}`); return; }
+      const { error: variantError } = await supabase.from("product_variants").insert({ product_id: created.id, variant_name: "Default", stock_quantity: stock });
+      if (variantError) { onToast(`Prodotto creato ma errore variante: ${variantError.message}`); } else { onToast("Prodotto aggiunto.", "success"); (event.target as HTMLFormElement).reset(); }
       await reload();
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
+  }
+
+  async function deleteProduct(product: Product) {
+    if (!window.confirm(`Eliminare "${product.name}"? Questa azione è irreversibile.`)) return;
+    const { error } = await getSupabase().from("products").delete().eq("id", product.id);
+    if (error) { onToast(`Errore eliminazione: ${error.message}`); return; }
+    onToast("Prodotto eliminato.", "success");
+    await reload();
+  }
+
+  async function updateProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingProduct) return;
+    setUpdatingProduct(true);
+    try {
+      const form = new FormData(event.currentTarget);
+      const fileInput = event.currentTarget.querySelector<HTMLInputElement>('input[type="file"]');
+      const file = fileInput?.files?.[0];
+      let image_url = editingProduct.image_url ?? null;
+
+      if (file) {
+        const supabase = getSupabase();
+        const ext = file.name.split(".").pop() ?? "jpg";
+        const filePath = `prodotti/${String(editingProduct.id)}-${Date.now()}.${ext}`;
+        const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, file, { upsert: true });
+        if (storageErr) { onToast(`Errore immagine: ${storageErr.message}`); return; }
+        const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+        image_url = urlData.publicUrl;
+      }
+
+      const { error } = await getSupabase().from("products").update({
+        name: String(form.get("name") ?? "").trim(),
+        category: String(form.get("category") ?? "Altro"),
+        base_price_sell: Number(form.get("price") ?? 0),
+        description: String(form.get("description") ?? "") || null,
+        image_url,
+      }).eq("id", editingProduct.id);
+
+      if (error) { onToast(`Errore aggiornamento: ${error.message}`); return; }
+      onToast("Prodotto aggiornato.", "success");
+      setEditingProduct(null);
+      await reload();
+    } finally { setUpdatingProduct(false); }
   }
 
   return (
     <>
       <ModuleHeader title="Magazzino" text="Inventario merch, varianti e alert stock con lettura diretta dalle tabelle products e product_variants." icon={Warehouse} />
+
+      {/* Modal modifica prodotto */}
+      {editingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4" onClick={() => setEditingProduct(null)}>
+          <form key={String(editingProduct.id)} onSubmit={updateProduct} className="glass w-full max-w-lg rounded-md p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-5 flex items-center justify-between">
+              <p className="text-lg font-black text-white">Modifica prodotto</p>
+              <button type="button" onClick={() => setEditingProduct(null)} className="text-white/40 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="mb-1 flex gap-4">
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-white/5">
+                {editingProduct.image_url ? (
+                  <Image src={editingProduct.image_url} alt={editingProduct.name} width={80} height={80} className="h-full w-full object-cover" />
+                ) : (
+                  <Package size={24} className="text-white/20" />
+                )}
+              </div>
+              <label className="flex-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">Immagine prodotto</span>
+                <input type="file" accept="image/*" className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
+              </label>
+            </div>
+            <Input name="name" label="Nome" required defaultValue={editingProduct.name} />
+            <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} defaultValue={editingProduct.category ?? "Altro"} />
+            <Input name="price" label="Prezzo vendita" type="number" step="0.01" defaultValue={String(editingProduct.base_price_sell ?? "")} />
+            <Textarea name="description" label="Descrizione" defaultValue={editingProduct.description ?? ""} rows={3} />
+            <div className="mt-5 flex gap-3">
+              <button disabled={updatingProduct} className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
+                {updatingProduct ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                Salva modifiche
+              </button>
+              <button type="button" onClick={() => setEditingProduct(null)} className="inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-3 text-sm font-bold text-white/60 hover:text-white">
+                Annulla
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <div className="glass rounded-md p-5">
           <div className="mb-5 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
@@ -634,26 +695,53 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
             <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[760px] border-collapse text-left text-sm">
               <thead className="text-xs uppercase tracking-[0.16em] text-white/38">
                 <tr>
+                  <th className="border-b border-white/10 py-3 w-12"></th>
                   <th className="border-b border-white/10 py-3">Prodotto</th>
                   <th className="border-b border-white/10 py-3">Categoria</th>
                   <th className="border-b border-white/10 py-3">Varianti</th>
                   <th className="border-b border-white/10 py-3 text-right">Prezzo</th>
                   <th className="border-b border-white/10 py-3 text-right">Stock</th>
+                  <th className="border-b border-white/10 py-3 text-right"></th>
                 </tr>
               </thead>
               <tbody>
+                {filtered.length === 0 && (
+                  <tr><td colSpan={7} className="py-10 text-center text-sm text-white/40">Nessun prodotto trovato.</td></tr>
+                )}
                 {filtered.map((product) => {
                   const stock = (product.product_variants ?? []).reduce((sum, item) => sum + Number(item.stock_quantity ?? 0), 0);
                   return (
                     <tr key={product.id} className="border-b border-white/7 text-white/78">
-                      <td className="py-4 font-bold text-white">{product.name}</td>
+                      <td className="py-4">
+                        {product.image_url ? (
+                          <Image src={product.image_url} alt={product.name} width={36} height={36} className="h-9 w-9 rounded object-cover" />
+                        ) : (
+                          <div className="flex h-9 w-9 items-center justify-center rounded border border-white/10 bg-white/5">
+                            <Package size={14} className="text-white/20" />
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-4">
+                        <p className="font-bold text-white">{product.name}</p>
+                        {product.description && <p className="mt-0.5 text-xs text-white/40 line-clamp-1">{product.description}</p>}
+                      </td>
                       <td className="py-4">{product.category ?? "Generale"}</td>
                       <td className="py-4">{(product.product_variants ?? []).map((variant) => `${variant.variant_name}: ${variant.stock_quantity}`).join(" · ")}</td>
                       <td className="py-4 text-right font-mono">{formatEuro(product.base_price_sell)}</td>
                       <td className={`py-4 text-right font-mono font-black ${stock < 6 ? "text-red-300" : "text-emerald-300"}`}>{stock}</td>
+                      <td className="py-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setEditingProduct(product)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-white/40 hover:bg-white/8 hover:text-white" title="Modifica">
+                            <Pencil size={13} />
+                          </button>
+                          <button onClick={() => deleteProduct(product)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10" title="Elimina">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -680,7 +768,7 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
 // FIX 3: CalendarModule con vista mensile
 function CalendarModule({ events, user, reload, onToast }: { events: CalendarEvent[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [saving, setSaving] = useState(false);
-  const [calView, setCalView] = useState<"list" | "month">("list");
+  const [calView, setCalView] = useState<"list" | "month">("month");
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth()); // 0-indexed
   const [popoverEvent, setPopoverEvent] = useState<CalendarEvent | null>(null);
@@ -800,19 +888,21 @@ function CalendarModule({ events, user, reload, onToast }: { events: CalendarEve
     <>
       <ModuleHeader title="Calendario" text="Vista eventi condivisa per live, release, interviste e sessioni studio." icon={CalendarDays} />
 
-      {/* Toggle Lista / Mensile */}
+      {/* Toggle Mensile / Lista */}
       <div className="mb-5 flex items-center gap-2">
         <button
-          onClick={() => setCalView("list")}
-          className={`rounded-md px-4 py-2 text-sm font-bold transition ${calView === "list" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+          onClick={() => setCalView("month")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${calView === "month" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
         >
-          Lista
+          <CalendarDays size={14} />
+          Mensile
         </button>
         <button
-          onClick={() => setCalView("month")}
-          className={`rounded-md px-4 py-2 text-sm font-bold transition ${calView === "month" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+          onClick={() => setCalView("list")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${calView === "list" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
         >
-          Mensile
+          <List size={14} />
+          Lista
         </button>
       </div>
 
@@ -976,6 +1066,11 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
   const [showTrackForm, setShowTrackForm] = useState(false);
   const [savingAlbum, setSavingAlbum] = useState(false);
   const [uploadingTrack, setUploadingTrack] = useState(false);
+  const [albumNameEditing, setAlbumNameEditing] = useState(false);
+  const [albumNameDraft, setAlbumNameDraft] = useState("");
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+  const [savingTrackInfo, setSavingTrackInfo] = useState(false);
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1105,11 +1200,58 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
 
   async function updateTrackPhase(trackId: string | number, fase: string) {
     const { error } = await getSupabase().from("tracce_audio").update({ fase }).eq("id", trackId);
-    if (error) {
-      onToast(`Errore aggiornamento fase: ${error.message}`);
-    } else {
+    if (error) { onToast(`Errore aggiornamento fase: ${error.message}`); } else { await reload(); }
+  }
+
+  async function renameAlbum() {
+    if (!selectedAlbum || !albumNameDraft.trim()) return;
+    const { error } = await getSupabase().from("album_progetti").update({ nome_album: albumNameDraft.trim() }).eq("id", selectedAlbum.id);
+    if (error) { onToast(`Errore: ${error.message}`); return; }
+    setSelectedAlbum({ ...selectedAlbum, nome_album: albumNameDraft.trim() });
+    setAlbumNameEditing(false);
+    onToast("Album rinominato.", "success");
+    await reload();
+  }
+
+  async function uploadAlbumCover(file: File) {
+    if (!selectedAlbum) return;
+    setUploadingCover(true);
+    try {
+      const supabase = getSupabase();
+      const ext = file.name.split(".").pop() ?? "jpg";
+      const filePath = `album-covers/${String(selectedAlbum.id)}.${ext}`;
+      const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, file, { upsert: true });
+      if (storageErr) { onToast(`Errore cover: ${storageErr.message}`); return; }
+      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+      const cover_image_url = urlData.publicUrl;
+      const { error } = await supabase.from("album_progetti").update({ cover_image_url }).eq("id", selectedAlbum.id);
+      if (error) { onToast(`Errore: ${error.message}`); return; }
+      setSelectedAlbum({ ...selectedAlbum, cover_image_url });
+      onToast("Copertina caricata.", "success");
       await reload();
-    }
+    } finally { setUploadingCover(false); }
+  }
+
+  async function updateTrack(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingTrack) return;
+    setSavingTrackInfo(true);
+    try {
+      const form = new FormData(event.currentTarget);
+      const nome_traccia = String(form.get("nome_traccia") ?? "").trim() || editingTrack.nome_traccia;
+      const bpmRaw = Number(form.get("bpm") ?? "");
+      const { error } = await getSupabase().from("tracce_audio").update({
+        nome_traccia,
+        fase: String(form.get("fase") ?? editingTrack.fase),
+        bpm: bpmRaw > 0 ? bpmRaw : null,
+        tonalita: String(form.get("tonalita") ?? "") || null,
+        nota: String(form.get("nota") ?? "") || null,
+      }).eq("id", editingTrack.id);
+      if (error) { onToast(`Errore: ${error.message}`); return; }
+      onToast("Traccia aggiornata.", "success");
+      setEditingTrack(null);
+      await reload();
+    } finally { setSavingTrackInfo(false); }
   }
 
   const unassignedTracks = tracks.filter((t) => !t.album_id);
@@ -1136,15 +1278,56 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
 
         {/* Header album */}
         <div className="glass mb-5 flex flex-col gap-5 rounded-md p-5 sm:flex-row sm:items-center">
-          <div className={`h-24 w-24 shrink-0 overflow-hidden rounded-md bg-gradient-to-br ${albumGradient(selectedAlbum.id)} flex items-center justify-center`}>
-            {selectedAlbum.cover_image_url ? (
-              <Image src={selectedAlbum.cover_image_url} alt={selectedAlbum.nome_album} width={96} height={96} className="h-full w-full object-cover" />
-            ) : (
-              <Music size={32} className="text-white/40" />
-            )}
-          </div>
+          {/* Cover con upload al click */}
+          <label className="group relative h-24 w-24 shrink-0 cursor-pointer overflow-hidden rounded-md">
+            <div className={`h-full w-full bg-gradient-to-br ${albumGradient(selectedAlbum.id)} flex items-center justify-center`}>
+              {selectedAlbum.cover_image_url ? (
+                <Image src={selectedAlbum.cover_image_url} alt={selectedAlbum.nome_album} fill className="object-cover" />
+              ) : (
+                <Music size={32} className="text-white/40" />
+              )}
+            </div>
+            <div className="absolute inset-0 flex flex-col items-center justify-center rounded-md bg-black/70 opacity-0 transition group-hover:opacity-100">
+              {uploadingCover ? <Loader2 size={18} className="animate-spin text-white" /> : (
+                <>
+                  <UploadCloud size={18} className="text-white" />
+                  <span className="mt-1 text-[10px] font-bold text-white">Cover</span>
+                </>
+              )}
+            </div>
+            <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAlbumCover(f); }} />
+          </label>
+
           <div className="flex-1">
-            <h3 className="text-2xl font-black text-white">{selectedAlbum.nome_album}</h3>
+            {albumNameEditing ? (
+              <div className="flex items-center gap-2">
+                <input
+                  value={albumNameDraft}
+                  onChange={(e) => setAlbumNameDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); renameAlbum(); } if (e.key === "Escape") setAlbumNameEditing(false); }}
+                  className="field flex-1 rounded-md px-3 py-2 text-lg font-black"
+                  autoFocus
+                />
+                <button type="button" onClick={renameAlbum} className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-orange-500 text-black hover:bg-orange-300">
+                  <Save size={15} />
+                </button>
+                <button type="button" onClick={() => setAlbumNameEditing(false)} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-white/50 hover:text-white">
+                  <X size={15} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h3 className="text-2xl font-black text-white">{selectedAlbum.nome_album}</h3>
+                <button
+                  type="button"
+                  onClick={() => { setAlbumNameEditing(true); setAlbumNameDraft(selectedAlbum.nome_album); }}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-white/40 hover:text-white"
+                  title="Rinomina album"
+                >
+                  <Pencil size={13} />
+                </button>
+              </div>
+            )}
             <p className="mt-1 text-sm text-white/50">{albumTracks.length} tracce</p>
           </div>
           <div className="flex items-center gap-2">
@@ -1186,6 +1369,34 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
           </form>
         )}
 
+        {/* Modal modifica traccia */}
+        {editingTrack && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4" onClick={() => setEditingTrack(null)}>
+            <form key={String(editingTrack.id)} onSubmit={updateTrack} className="glass w-full max-w-md rounded-md p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-5 flex items-center justify-between">
+                <p className="font-black text-white">Modifica traccia</p>
+                <button type="button" onClick={() => setEditingTrack(null)} className="text-white/40 hover:text-white"><X size={18} /></button>
+              </div>
+              <Input name="nome_traccia" label="Nome traccia" required defaultValue={editingTrack.nome_traccia} />
+              <div className="mt-4 grid grid-cols-2 gap-4">
+                <Select name="fase" label="Fase" options={[...TRACK_PHASES]} defaultValue={editingTrack.fase ?? "Demo"} />
+                <Input name="bpm" label="BPM" type="number" min="40" max="300" defaultValue={editingTrack.bpm ? String(editingTrack.bpm) : ""} />
+              </div>
+              <Input name="tonalita" label="Tonalità" placeholder="Es. La minore, Do maggiore" defaultValue={editingTrack.tonalita ?? ""} />
+              <Textarea name="nota" label="Note" rows={3} defaultValue={editingTrack.nota ?? ""} />
+              <div className="mt-5 flex gap-3">
+                <button disabled={savingTrackInfo} className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
+                  {savingTrackInfo ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                  Salva
+                </button>
+                <button type="button" onClick={() => setEditingTrack(null)} className="inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-3 text-sm font-bold text-white/60 hover:text-white">
+                  Annulla
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* Tabella tracce */}
         <div className="glass rounded-md p-5">
           {albumTracks.length === 0 ? (
@@ -1198,7 +1409,7 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
                     <th className="border-b border-white/10 py-3 text-left">#</th>
                     <th className="border-b border-white/10 py-3 text-left">Traccia</th>
                     <th className="border-b border-white/10 py-3 text-left">Fase</th>
-                    <th className="border-b border-white/10 py-3 text-right"></th>
+                    <th className="border-b border-white/10 py-3 text-right">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1207,6 +1418,11 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
                       <td className="py-4 font-mono text-white/40">{idx + 1}</td>
                       <td className="py-4">
                         <p className="font-bold text-white">{track.nome_traccia}</p>
+                        {(track.bpm || track.tonalita || track.nota) && (
+                          <p className="mt-0.5 text-xs text-white/40">
+                            {[track.bpm && `${track.bpm} BPM`, track.tonalita, track.nota].filter(Boolean).join(" · ")}
+                          </p>
+                        )}
                         {track.audio_file_url ? (
                           <audio className="mt-2 h-8 w-full" controls src={track.audio_file_url} />
                         ) : (
@@ -1223,9 +1439,14 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
                         </select>
                       </td>
                       <td className="py-4 text-right">
-                        <button onClick={() => deleteTrack(track)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10">
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setEditingTrack(track)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-white/40 hover:bg-white/8 hover:text-white" title="Modifica">
+                            <Pencil size={13} />
+                          </button>
+                          <button onClick={() => deleteTrack(track)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1394,18 +1615,19 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
     }
   }
 
-  function downloadTxt() {
+  function buildPressKitHtml(content: string, italianDate: string): string {
+    const escaped = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}.page{max-width:760px;margin:0 auto;padding:60px 50px}.header{border-bottom:3px solid #f97316;padding-bottom:24px;margin-bottom:40px}.brand{font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#f97316;margin-bottom:8px;font-weight:700}.title{font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;font-family:'Helvetica Neue',Arial,sans-serif}.date{font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:#888;margin-top:10px}.content{font-size:14px;line-height:1.9;color:#222;white-space:pre-wrap;word-break:break-word}.footer{margin-top:50px;padding-top:18px;border-top:1px solid #e5e5e5;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:40px}}</style></head><body><div class="page"><div class="header"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="title">Media Press Kit</div><div class="date">Generato il ${italianDate}</div></div><div class="content">${escaped}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${italianDate}</span></div></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+  }
+
+  function downloadPdf() {
     const today = new Date();
-    const dateStr = today.toISOString().split("T")[0];
-    const blob = new Blob([answer], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `press-kit-${dateStr}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const [year, month, day] = today.toISOString().split("T")[0].split("-");
+    const italianDate = `${day}/${month}/${year}`;
+    const win = window.open("", "_blank");
+    if (!win) { onToast("Popup bloccato. Abilita i popup per generare il PDF."); return; }
+    win.document.write(buildPressKitHtml(answer, italianDate));
+    win.document.close();
   }
 
   async function saveToVault() {
@@ -1413,44 +1635,26 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
     try {
       const today = new Date();
       const dateStr = today.toISOString().split("T")[0];
-      const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(":", "");
-      const filePath = `press-kit/press-kit-${dateTimeStr}.txt`;
-
-      const blob = new Blob([answer], { type: "text/plain;charset=utf-8" });
-      const supabase = getSupabase();
-
-      const { error: storageError } = await supabase.storage.from("vault").upload(filePath, blob, {
-        contentType: "text/plain",
-        upsert: true,
-      });
-
-      if (storageError) {
-        onToast(`Errore upload vault: ${storageError.message}`);
-        return;
-      }
-
-      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
-
-      // Formatta data italiana DD/MM/YYYY
+      const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(/:/g, "");
       const [year, month, day] = dateStr.split("-");
       const italianDate = `${day}/${month}/${year}`;
+      const filePath = `press-kit/press-kit-${dateTimeStr}.html`;
+      const htmlContent = buildPressKitHtml(answer, italianDate);
+      const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+      const supabase = getSupabase();
 
+      const { error: storageError } = await supabase.storage.from("vault").upload(filePath, blob, { contentType: "text/html", upsert: true });
+      if (storageError) { onToast(`Errore upload vault: ${storageError.message}`); return; }
+
+      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
       const { error: dbError } = await supabase.from("vault_documenti").insert({
         nome_file: `Press Kit ${italianDate}`,
         cartella: "Press",
         file_url: urlData.publicUrl,
-        caricato_da: user.id,
       });
-
-      if (dbError) {
-        onToast(`Errore salvataggio vault: ${dbError.message}`);
-        return;
-      }
-
+      if (dbError) { onToast(`Errore salvataggio vault: ${dbError.message}`); return; }
       onToast("Press Kit salvato nel Vault.", "success");
-    } finally {
-      setSavingToVault(false);
-    }
+    } finally { setSavingToVault(false); }
   }
 
   return (
@@ -1480,11 +1684,11 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
           {answer !== "" && (
             <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-5">
               <button
-                onClick={downloadTxt}
+                onClick={downloadPdf}
                 className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-white/10"
               >
                 <Download size={15} />
-                Scarica .txt
+                Esporta PDF
               </button>
               <button
                 onClick={saveToVault}
@@ -1887,11 +2091,11 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { l
   );
 }
 
-function Select({ label, name, options }: { label: string; name: string; options: readonly string[] | string[] }) {
+function Select({ label, name, options, defaultValue }: { label: string; name: string; options: readonly string[] | string[]; defaultValue?: string }) {
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <select name={name} className="field mt-2 rounded-md px-3 py-2.5 text-sm">
+      <select name={name} defaultValue={defaultValue} className="field mt-2 rounded-md px-3 py-2.5 text-sm">
         {options.map((option) => (
           <option key={option} value={option} className="bg-neutral-950">
             {option}

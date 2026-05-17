@@ -12,6 +12,8 @@ export type Product = {
   category: string | null;
   base_price_sell: number | null;
   base_price_cost: number | null;
+  image_url?: string | null;
+  description?: string | null;
   product_variants?: ProductVariant[];
 };
 
@@ -39,6 +41,9 @@ export type Track = {
   nome_traccia: string;
   fase: string | null;
   audio_file_url?: string | null;
+  nota?: string | null;
+  bpm?: number | null;
+  tonalita?: string | null;
   album_progetti?: { id: string | number; nome_album: string } | null;
 };
 

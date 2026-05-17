@@ -134,6 +134,17 @@ CREATE POLICY "auth_all" ON tasks_kanban      FOR ALL TO authenticated USING (tr
 -- user_roles, vault_cartelle, vault_documenti
 
 -- =========================================================
+-- NUOVE COLONNE (ALTER TABLE ADD COLUMN IF NOT EXISTS — idempotente)
+-- Da eseguire nel SQL Editor Supabase dopo aver rieseguito tutto lo schema
+-- =========================================================
+
+ALTER TABLE products     ADD COLUMN IF NOT EXISTS image_url   text;
+ALTER TABLE products     ADD COLUMN IF NOT EXISTS description  text;
+ALTER TABLE tracce_audio ADD COLUMN IF NOT EXISTS nota         text;
+ALTER TABLE tracce_audio ADD COLUMN IF NOT EXISTS bpm          integer;
+ALTER TABLE tracce_audio ADD COLUMN IF NOT EXISTS tonalita     text;
+
+-- =========================================================
 -- STORAGE BUCKET
 -- =========================================================
 -- Bucket esistente: superfluido_bucket (cartelle vault/ e audio/ dentro)
