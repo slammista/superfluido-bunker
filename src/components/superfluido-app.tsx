@@ -1616,8 +1616,36 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
   }
 
   function buildPressKitHtml(content: string, italianDate: string): string {
-    const escaped = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}.page{max-width:760px;margin:0 auto;padding:60px 50px}.header{border-bottom:3px solid #f97316;padding-bottom:24px;margin-bottom:40px}.brand{font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#f97316;margin-bottom:8px;font-weight:700}.title{font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;font-family:'Helvetica Neue',Arial,sans-serif}.date{font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:#888;margin-top:10px}.content{font-size:14px;line-height:1.9;color:#222;white-space:pre-wrap;word-break:break-word}.footer{margin-top:50px;padding-top:18px;border-top:1px solid #e5e5e5;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:40px}}</style></head><body><div class="page"><div class="header"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="title">Media Press Kit</div><div class="date">Generato il ${italianDate}</div></div><div class="content">${escaped}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${italianDate}</span></div></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+    // Markdown → HTML converter
+    function esc(s: string) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    function inline(s: string) {
+      return esc(s)
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.+?)\*/g, "<em>$1</em>");
+    }
+    const lines = content.split("\n");
+    const chunks: string[] = [];
+    const listBuf: string[] = [];
+    function flushList() {
+      if (listBuf.length) { chunks.push("<ul>" + listBuf.join("") + "</ul>"); listBuf.length = 0; }
+    }
+    for (const line of lines) {
+      const t = line.trim();
+      if (t.startsWith("### ")) { flushList(); chunks.push(`<h3>${inline(t.slice(4))}</h3>`); }
+      else if (t.startsWith("## ")) { flushList(); chunks.push(`<h2>${inline(t.slice(3))}</h2>`); }
+      else if (t.startsWith("# ")) { flushList(); chunks.push(`<h1>${inline(t.slice(2))}</h1>`); }
+      else if (/^[-*] /.test(t)) { listBuf.push(`<li>${inline(t.slice(2))}</li>`); }
+      else if (/^\d+\. /.test(t)) { listBuf.push(`<li>${inline(t.replace(/^\d+\. /, ""))}</li>`); }
+      else if (t === "---" || t === "***") { flushList(); chunks.push("<hr>"); }
+      else if (t === "") { flushList(); }
+      else { flushList(); chunks.push(`<p>${inline(t)}</p>`); }
+    }
+    flushList();
+    const body = chunks.join("\n");
+    const css = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}.page{max-width:760px;margin:0 auto;padding:60px 50px}.hdr{border-bottom:3px solid #f97316;padding-bottom:24px;margin-bottom:40px}.brand{font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#f97316;margin-bottom:8px;font-weight:700}.pk-title{font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;font-family:'Helvetica Neue',Arial,sans-serif}.dt{font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:#888;margin-top:10px}.content h1{font-size:26px;font-weight:900;margin:32px 0 10px;font-family:'Helvetica Neue',Arial,sans-serif}.content h2{font-size:20px;font-weight:800;margin:28px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif}.content h3{font-size:12px;font-weight:700;margin:26px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#f97316}.content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}.content ul{margin:4px 0 16px 20px}.content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:5px}.content hr{border:none;border-top:1px solid #e5e5e5;margin:20px 0}.content strong{font-weight:700;color:#000}.content em{font-style:italic}.footer{margin-top:50px;padding-top:18px;border-top:1px solid #e5e5e5;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:40px}}`;
+    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>${css}</style></head><body><div class="page"><div class="hdr"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="pk-title">Media Press Kit</div><div class="dt">Generato il ${esc(italianDate)}</div></div><div class="content">${body}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${esc(italianDate)}</span></div></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
   }
 
   function downloadPdf() {
