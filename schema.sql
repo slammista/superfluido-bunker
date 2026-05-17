@@ -103,9 +103,9 @@ CREATE POLICY "auth_all" ON profili_artisti   FOR ALL TO authenticated USING (tr
 CREATE POLICY "auth_all" ON vault_documenti   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- =========================================================
--- STORAGE BUCKETS (da creare manualmente nel dashboard)
+-- STORAGE BUCKET
 -- =========================================================
--- 1. Supabase Dashboard > Storage > New bucket
---    Nome: vault   — Public: ON
--- 2. Supabase Dashboard > Storage > New bucket
---    Nome: audio   — Public: ON
+-- Bucket già esistente: superfluido_bucket (con cartelle vault/ e audio/ dentro)
+-- Il codice usa: supabase.storage.from("superfluido_bucket").upload("audio/...", file)
+--                supabase.storage.from("superfluido_bucket").upload("vault/...", file)
+-- Assicurarsi che il bucket sia pubblico (Public bucket: ON) nel dashboard.

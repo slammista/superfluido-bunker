@@ -861,10 +861,10 @@ function Projects({
       let audio_file_url: string | null = null;
 
       if (file) {
-        const filePath = `${Date.now()}-${file.name}`;
-        const { error: storageError } = await supabase.storage.from("audio").upload(filePath, file);
+        const filePath = `audio/${Date.now()}-${file.name}`;
+        const { error: storageError } = await supabase.storage.from("superfluido_bucket").upload(filePath, file);
         if (storageError) throw storageError;
-        const { data: urlData } = supabase.storage.from("audio").getPublicUrl(filePath);
+        const { data: urlData } = supabase.storage.from("superfluido_bucket").getPublicUrl(filePath);
         audio_file_url = urlData.publicUrl;
       }
 
@@ -1293,11 +1293,11 @@ function Vault({
       if (!file) return;
 
       const supabase = getSupabase();
-      const filePath = `${Date.now()}-${file.name}`;
-      const { error: storageError } = await supabase.storage.from("vault").upload(filePath, file);
+      const filePath = `vault/${Date.now()}-${file.name}`;
+      const { error: storageError } = await supabase.storage.from("superfluido_bucket").upload(filePath, file);
       if (storageError) throw storageError;
 
-      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+      const { data: urlData } = supabase.storage.from("superfluido_bucket").getPublicUrl(filePath);
       const { error } = await supabase.from("vault_documenti").insert({
         nome_file: (form.get("nome_file") as string) || file.name,
         cartella: form.get("cartella"),
