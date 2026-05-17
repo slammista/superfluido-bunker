@@ -39,7 +39,7 @@ import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
 
-type View = "home" | "inventory" | "calendar" | "projects" | "press" | "profile" | "vault" | "kanban";
+type View = "home" | "inventory" | "calendar" | "projects" | "press" | "profile" | "vault";
 
 type AppUser = {
   id: string;
@@ -69,7 +69,6 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "press", label: "AI Press Kit", icon: Bot },
   { id: "profile", label: "Profili", icon: UserRound },
   { id: "vault", label: "Vault", icon: FolderOpen },
-  { id: "kanban", label: "Task Board", icon: ClipboardList },
 ];
 
 // Categorie prodotto allineate al CHECK constraint del DB
@@ -343,7 +342,7 @@ export function SuperfluidoApp() {
           <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "calendar" ? "" : "hidden"}>
-          <CalendarModule events={state.events} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
+          <CalendarModule events={state.events} tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "projects" ? "" : "hidden"}>
           <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
@@ -357,9 +356,6 @@ export function SuperfluidoApp() {
         </div>
         <div className={view === "vault" ? "" : "hidden"}>
           <Vault files={state.vault} folders={state.folders} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
-        <div className={view === "kanban" ? "" : "hidden"}>
-          <KanbanBoard tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
       </section>
     </main>
@@ -569,7 +565,7 @@ function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo:
               <ClipboardList size={16} className="text-orange-300" />
               <p className="font-black text-white">Task Board</p>
             </div>
-            <button onClick={() => goTo("kanban")} className="text-xs font-semibold text-orange-300 hover:text-orange-200 transition">
+            <button onClick={() => goTo("calendar")} className="text-xs font-semibold text-orange-300 hover:text-orange-200 transition">
               Vedi tutto →
             </button>
           </div>
@@ -854,9 +850,9 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
 }
 
 // FIX 3: CalendarModule con vista mensile
-function CalendarModule({ events, user, reload, onToast }: { events: CalendarEvent[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
+function CalendarModule({ events, tasks, user, reload, onToast }: { events: CalendarEvent[]; tasks: KanbanTask[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [saving, setSaving] = useState(false);
-  const [calView, setCalView] = useState<"list" | "month">("month");
+  const [calView, setCalView] = useState<"month" | "list" | "kanban">("month");
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth()); // 0-indexed
   const [popoverEvent, setPopoverEvent] = useState<CalendarEvent | null>(null);
@@ -974,9 +970,13 @@ function CalendarModule({ events, user, reload, onToast }: { events: CalendarEve
 
   return (
     <>
-      <ModuleHeader title="Calendario" text="Vista eventi condivisa per live, release, interviste e sessioni studio." icon={CalendarDays} />
+      <ModuleHeader
+        title={calView === "kanban" ? "Task Board" : "Calendario"}
+        text={calView === "kanban" ? "Kanban del collettivo — Da Fare, In Corso, Completato." : "Vista eventi condivisa per live, release, interviste e sessioni studio."}
+        icon={calView === "kanban" ? ClipboardList : CalendarDays}
+      />
 
-      {/* Toggle Mensile / Lista */}
+      {/* Toggle Mensile / Lista / Task Board */}
       <div className="mb-5 flex items-center gap-2">
         <button
           onClick={() => setCalView("month")}
@@ -992,7 +992,18 @@ function CalendarModule({ events, user, reload, onToast }: { events: CalendarEve
           <List size={14} />
           Lista
         </button>
+        <button
+          onClick={() => setCalView("kanban")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${calView === "kanban" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <ClipboardList size={14} />
+          Task Board
+        </button>
       </div>
+
+      {calView === "kanban" && (
+        <KanbanBoard hideHeader tasks={tasks} user={user} reload={reload} onToast={onToast} />
+      )}
 
       {calView === "month" ? (
         <div className="glass mb-5 rounded-md p-5">
@@ -1083,46 +1094,48 @@ function CalendarModule({ events, user, reload, onToast }: { events: CalendarEve
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-        <div className="glass rounded-md p-5">
-          {events.length === 0 ? (
-            <p className="py-10 text-center text-sm text-white/40">Nessun evento in calendario.</p>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {events.map((event) => (
-                <article key={event.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                  <div className="mb-4 h-1 rounded-full" style={{ background: event.colore ?? "#ff6b35" }} />
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">{event.tipo_evento}</p>
-                  <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
-                  <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
-                  <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
-                  <div className="mt-4 flex justify-end">
-                    <button
-                      onClick={() => deleteEvent(event.id)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
-                      title="Elimina evento"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
+      {calView !== "kanban" && (
+        <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
+          <div className="glass rounded-md p-5">
+            {events.length === 0 ? (
+              <p className="py-10 text-center text-sm text-white/40">Nessun evento in calendario.</p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {events.map((event) => (
+                  <article key={event.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+                    <div className="mb-4 h-1 rounded-full" style={{ background: event.colore ?? "#ff6b35" }} />
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">{event.tipo_evento}</p>
+                    <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
+                    <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
+                    <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        onClick={() => deleteEvent(event.id)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
+                        title="Elimina evento"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
 
-        <form onSubmit={createEvent} className="glass rounded-md p-5">
-          <p className="text-lg font-black text-white">Nuovo evento</p>
-          <Input name="title" label="Titolo" required />
-          <Select name="type" label="Tipo" options={["Live", "Intervista", "Sessione Studio", "Release"]} />
-          <Input name="date" label="Data" type="date" required />
-          <Input name="time" label="Ora" type="time" defaultValue="20:00" />
-          <Input name="place" label="Luogo" />
-          <Input name="color" label="Colore" type="color" defaultValue="#ff6b35" />
-          <Textarea name="note" label="Note" />
-          <ActionButton icon={Plus} text="Registra data" loading={saving} />
-        </form>
-      </div>
+          <form onSubmit={createEvent} className="glass rounded-md p-5">
+            <p className="text-lg font-black text-white">Nuovo evento</p>
+            <Input name="title" label="Titolo" required />
+            <Select name="type" label="Tipo" options={["Live", "Intervista", "Sessione Studio", "Release"]} />
+            <Input name="date" label="Data" type="date" required />
+            <Input name="time" label="Ora" type="time" defaultValue="20:00" />
+            <Input name="place" label="Luogo" />
+            <Input name="color" label="Colore" type="color" defaultValue="#ff6b35" />
+            <Textarea name="note" label="Note" />
+            <ActionButton icon={Plus} text="Registra data" loading={saving} />
+          </form>
+        </div>
+      )}
     </>
   );
 }
@@ -2055,11 +2068,13 @@ function KanbanBoard({
   user,
   reload,
   onToast,
+  hideHeader,
 }: {
   tasks: KanbanTask[];
   user: AppUser;
   reload: () => Promise<void>;
   onToast: (text: string, kind?: "error" | "success") => void;
+  hideHeader?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -2116,11 +2131,26 @@ function KanbanBoard({
 
   return (
     <>
-      <ModuleHeader
-        title="Task Board"
-        text="Kanban del collettivo — Da Fare, In Corso, Completato."
-        icon={ClipboardList}
-        actions={
+      {!hideHeader && (
+        <ModuleHeader
+          title="Task Board"
+          text="Kanban del collettivo — Da Fare, In Corso, Completato."
+          icon={ClipboardList}
+          actions={
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-black transition hover:bg-orange-300"
+            >
+              <Plus size={15} />
+              Nuovo task
+            </button>
+          }
+        />
+      )}
+
+      {hideHeader && (
+        <div className="mb-5 flex items-center justify-between">
+          <p className="text-sm text-white/40">Trascina le card per cambiare stato</p>
           <button
             onClick={() => setShowForm(!showForm)}
             className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-black transition hover:bg-orange-300"
@@ -2128,8 +2158,8 @@ function KanbanBoard({
             <Plus size={15} />
             Nuovo task
           </button>
-        }
-      />
+        </div>
+      )}
 
       {showForm && (
         <form onSubmit={createTask} className="glass mb-6 rounded-md p-5">
