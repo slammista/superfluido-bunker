@@ -2207,9 +2207,9 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
     setLoading(true);
     try {
       const res = await fetch("/api/drive/list", { method: "POST", body: JSON.stringify({ folderId: currentFolderId }) });
-      if (!res.ok) throw new Error("Failed to load Drive items");
-      const data = (await res.json()) as { items: any[] };
-      const sorted = (data.items || []).sort((a, b) => {
+      const data = (await res.json()) as { items?: any[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to load Drive items");
+      const sorted = (data.items ?? []).sort((a, b) => {
         if (a.mimeType === "application/vnd.google-apps.folder" && b.mimeType !== "application/vnd.google-apps.folder") return -1;
         if (a.mimeType !== "application/vnd.google-apps.folder" && b.mimeType === "application/vnd.google-apps.folder") return 1;
         return a.name.localeCompare(b.name);
@@ -2401,7 +2401,7 @@ function KanbanBoard({
         titolo,
         stato: String(data.get("stato") ?? "Da Fare"),
         scadenza: String(data.get("scadenza") ?? "") || null,
-        assegnato_a: user.email,
+        assegnato_a: user.id,
       });
       if (error) { onToast(`Errore task: ${error.message}`); return; }
       onToast("Task aggiunto.", "success");
