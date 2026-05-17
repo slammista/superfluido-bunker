@@ -1244,6 +1244,7 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
           </form>
         </div>
       )}
+
     </>
   );
 }
@@ -1268,6 +1269,168 @@ function albumGradient(id: string | number): string {
   return palettes[Math.abs(hash) % palettes.length];
 }
 
+// ── NowPlayingBar ─────────────────────────────────────────────
+
+function NowPlayingBar({
+  track,
+  album,
+  allTracks,
+  onTrackChange,
+  onClose,
+}: {
+  track: Track;
+  album: Album | null;
+  allTracks: Track[];
+  onTrackChange: (t: Track) => void;
+  onClose: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const waveRef = useRef<number[]>([]);
+  const rafRef = useRef(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [curTime, setCurTime] = useState(0);
+  const [dur, setDur] = useState(0);
+
+  useEffect(() => {
+    let seed = Math.abs(String(track.id).split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0));
+    const rand = () => { seed = ((seed * 1664525) + 1013904223) | 0; return Math.abs(seed) / 0x7fffffff; };
+    waveRef.current = Array.from({ length: 100 }, () => 0.15 + rand() * 0.85);
+    const a = audioRef.current;
+    if (a && track.audio_file_url) {
+      a.pause();
+      a.src = track.audio_file_url;
+      a.play().catch(() => {});
+      setIsPlaying(true);
+      setCurTime(0);
+      setDur(0);
+    }
+  }, [track.id]);
+
+  useEffect(() => {
+    function frame() {
+      const canvas = canvasRef.current;
+      const audio = audioRef.current;
+      if (!canvas) { rafRef.current = requestAnimationFrame(frame); return; }
+      const dpr = window.devicePixelRatio || 1;
+      const W = canvas.width, H = canvas.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { rafRef.current = requestAnimationFrame(frame); return; }
+      const progress = audio && isFinite(audio.duration) && audio.duration > 0 ? audio.currentTime / audio.duration : 0;
+      ctx.clearRect(0, 0, W, H);
+      const bars = waveRef.current;
+      const bw = 2 * dpr, gap = 1.5 * dpr, step = bw + gap;
+      const totalW = bars.length * step;
+      const ox = (W - totalW) / 2;
+      const px = ox + progress * totalW;
+      for (let i = 0; i < bars.length; i++) {
+        const x = ox + i * step;
+        const bh = bars[i] * H * 0.78;
+        const y = (H - bh) / 2;
+        ctx.fillStyle = x < px ? "#f97316" : "#2c2c2c";
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, 1);
+        else ctx.rect(x, y, bw, bh);
+        ctx.fill();
+      }
+      ctx.fillStyle = "#fb923c";
+      ctx.fillRect(px - 0.5 * dpr, 0, dpr, H);
+      rafRef.current = requestAnimationFrame(frame);
+    }
+    rafRef.current = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [track.id]);
+
+  useEffect(() => {
+    function resize() {
+      const canvas = canvasRef.current;
+      const wrap = canvas?.parentElement;
+      if (!canvas || !wrap) return;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = wrap.offsetWidth * dpr;
+      canvas.height = wrap.offsetHeight * dpr;
+    }
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  function toggle() {
+    const a = audioRef.current;
+    if (!a) return;
+    if (isPlaying) { a.pause(); setIsPlaying(false); }
+    else { a.play().catch(() => {}); setIsPlaying(true); }
+  }
+
+  function seek(e: React.MouseEvent<HTMLDivElement>) {
+    const a = audioRef.current;
+    if (!a || !isFinite(a.duration)) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    a.currentTime = ((e.clientX - rect.left) / rect.width) * a.duration;
+  }
+
+  function fmt(s: number) {
+    if (!isFinite(s) || isNaN(s)) return "0:00";
+    return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  }
+
+  const idx = allTracks.findIndex((t) => t.id === track.id);
+  function goNext() { if (idx < allTracks.length - 1) onTrackChange(allTracks[idx + 1]); }
+  function goPrev() { if (idx > 0) onTrackChange(allTracks[idx - 1]); }
+
+  return (
+    <>
+      <audio
+        ref={audioRef}
+        src={track.audio_file_url ?? undefined}
+        onTimeUpdate={() => setCurTime(audioRef.current?.currentTime ?? 0)}
+        onLoadedMetadata={() => setDur(audioRef.current?.duration ?? 0)}
+        onEnded={goNext}
+      />
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex h-[72px] items-center gap-3 border-t border-white/8 bg-[#0c0c0c]/96 px-4 backdrop-blur-xl">
+        {/* Thumbnail */}
+        <div className={`relative h-11 w-11 shrink-0 overflow-hidden rounded ${album ? `bg-gradient-to-br ${albumGradient(album.id)}` : "bg-white/10"} flex items-center justify-center`}>
+          {album?.cover_image_url ? (
+            <Image src={album.cover_image_url} alt="" fill className="object-cover" />
+          ) : (
+            <Music size={16} className="text-white/30" />
+          )}
+        </div>
+        {/* Info */}
+        <div className="w-36 min-w-0 shrink-0">
+          <p className="truncate text-xs font-bold text-white">{track.nome_traccia}</p>
+          {album && <p className="truncate text-[10px] text-white/35">{album.nome_album}</p>}
+        </div>
+        {/* Center controls + waveform */}
+        <div className="flex min-w-0 flex-1 flex-col items-center gap-1">
+          <div className="flex items-center gap-5">
+            <button type="button" onClick={goPrev} disabled={idx <= 0} className="text-white/35 transition hover:text-white disabled:opacity-20">
+              <ChevronLeft size={16} />
+            </button>
+            <button type="button" onClick={toggle} className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black transition hover:bg-orange-100">
+              {isPlaying ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
+            </button>
+            <button type="button" onClick={goNext} disabled={idx >= allTracks.length - 1} className="text-white/35 transition hover:text-white disabled:opacity-20">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="flex w-full max-w-sm items-center gap-2">
+            <span className="w-9 shrink-0 text-right font-mono text-[10px] tabular-nums text-white/30">{fmt(curTime)}</span>
+            <div onClick={seek} className="relative h-8 flex-1 cursor-pointer overflow-hidden rounded-sm">
+              <canvas ref={canvasRef} className="h-full w-full" />
+            </div>
+            <span className="w-9 shrink-0 font-mono text-[10px] tabular-nums text-white/30">{fmt(dur)}</span>
+          </div>
+        </div>
+        {/* Close */}
+        <button type="button" onClick={onClose} className="shrink-0 text-white/25 transition hover:text-white">
+          <X size={16} />
+        </button>
+      </div>
+    </>
+  );
+}
+
 // FIX 4: Projects completamente riscritto con griglia album
 function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; tracks: Track[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
@@ -1280,6 +1443,8 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
   const [uploadingCover, setUploadingCover] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [savingTrackInfo, setSavingTrackInfo] = useState(false);
+  const [playingTrack, setPlayingTrack] = useState<Track | null>(null);
+  const [playerAlbumTracks, setPlayerAlbumTracks] = useState<Track[]>([]);
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1623,19 +1788,37 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
                 </thead>
                 <tbody>
                   {albumTracks.map((track, idx) => (
-                    <tr key={track.id} className="border-b border-white/7">
-                      <td className="py-4 font-mono text-white/40">{idx + 1}</td>
+                    <tr key={track.id} className={`border-b border-white/7 transition ${playingTrack?.id === track.id ? "bg-orange-500/5" : ""}`}>
+                      <td className="w-10 py-4">
+                        {track.audio_file_url ? (
+                          <button
+                            type="button"
+                            onClick={() => { setPlayingTrack(track); setPlayerAlbumTracks(albumTracks); }}
+                            className="flex h-7 w-7 items-center justify-center text-white/40 hover:text-orange-300 transition"
+                          >
+                            {playingTrack?.id === track.id ? (
+                              <span className="flex h-4 w-5 items-end gap-[2px]">
+                                {[60, 100, 50, 80].map((h, i) => (
+                                  <span key={i} className="wave-bar w-[3px] rounded-[1px] bg-orange-400" style={{ height: `${h}%`, animationDelay: `${i * 0.15}s` }} />
+                                ))}
+                              </span>
+                            ) : (
+                              <Play size={12} fill="currentColor" />
+                            )}
+                          </button>
+                        ) : (
+                          <span className="font-mono text-xs text-white/25">{idx + 1}</span>
+                        )}
+                      </td>
                       <td className="py-4">
-                        <p className="font-bold text-white">{track.nome_traccia}</p>
+                        <p className={`font-bold ${playingTrack?.id === track.id ? "text-orange-200" : "text-white"}`}>{track.nome_traccia}</p>
                         {(track.bpm || track.tonalita || track.nota) && (
                           <p className="mt-0.5 text-xs text-white/40">
                             {[track.bpm && `${track.bpm} BPM`, track.tonalita, track.nota].filter(Boolean).join(" · ")}
                           </p>
                         )}
-                        {track.audio_file_url ? (
-                          <AudioPlayer src={track.audio_file_url} />
-                        ) : (
-                          <p className="mt-1 text-xs text-white/30">Audio non caricato</p>
+                        {!track.audio_file_url && (
+                          <p className="mt-1 text-xs text-white/25">Audio non caricato</p>
                         )}
                       </td>
                       <td className="py-4">
@@ -1664,6 +1847,15 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
             </div>
           )}
         </div>
+        {playingTrack && (
+          <NowPlayingBar
+            track={playingTrack}
+            album={albums.find((a) => a.id === playingTrack.album_id) ?? null}
+            allTracks={playerAlbumTracks}
+            onTrackChange={(t) => setPlayingTrack(t)}
+            onClose={() => setPlayingTrack(null)}
+          />
+        )}
       </>
     );
   }
@@ -2342,8 +2534,8 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
                   )}
                 </div>
                 <div className="ml-2 flex shrink-0 gap-1">
-                  {!isFolder(item.mimeType) && item.webContentLink && (
-                    <a href={item.webContentLink} target="_blank" rel="noreferrer" className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300">
+                  {!isFolder(item.mimeType) && (
+                    <a href={`/api/drive/file/${item.id}?name=${encodeURIComponent(item.name)}`} className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300">
                       <Download size={14} />
                     </a>
                   )}
