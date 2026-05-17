@@ -7,6 +7,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   Disc3,
   Download,
   FileAudio,
@@ -30,9 +31,9 @@ import {
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
-import type { Album, ArtistProfile, CalendarEvent, Product, Role, Track, VaultFile } from "@/lib/types";
+import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
 
-type View = "home" | "inventory" | "calendar" | "projects" | "press" | "profile" | "vault";
+type View = "home" | "inventory" | "calendar" | "projects" | "press" | "profile" | "vault" | "kanban";
 
 type AppUser = {
   id: string;
@@ -47,6 +48,8 @@ type AppState = {
   tracks: Track[];
   profiles: ArtistProfile[];
   vault: VaultFile[];
+  folders: VaultFolder[];
+  tasks: KanbanTask[];
 };
 
 const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
@@ -57,6 +60,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "press", label: "AI Press Kit", icon: Bot },
   { id: "profile", label: "Profili", icon: UserRound },
   { id: "vault", label: "Vault", icon: FolderOpen },
+  { id: "kanban", label: "Task Board", icon: ClipboardList },
 ];
 
 const emptyState: AppState = {
@@ -66,6 +70,8 @@ const emptyState: AppState = {
   tracks: [],
   profiles: [],
   vault: [],
+  folders: [],
+  tasks: [],
 };
 
 export function SuperfluidoApp() {
@@ -112,13 +118,15 @@ export function SuperfluidoApp() {
 
   async function loadWorkspace(userId: string) {
     const supabase = getSupabase();
-    const [products, events, albums, tracks, profiles, vault] = await Promise.all([
+    const [products, events, albums, tracks, profiles, vault, folders, tasks] = await Promise.all([
       supabase.from("products").select("*, product_variants(*)"),
       supabase.from("eventi_calendario").select("*").order("data_evento"),
       supabase.from("album_progetti").select("*").eq("creato_da", userId),
       supabase.from("tracce_audio").select("*, album_progetti(id, nome_album)").eq("caricato_da", userId),
       supabase.from("profili_artisti").select("*"),
       supabase.from("vault_documenti").select("*").order("created_at", { ascending: false }),
+      supabase.from("vault_cartelle").select("*").order("created_at"),
+      supabase.from("tasks_kanban").select("*").order("created_at"),
     ]);
     setState({
       products: (products.data ?? []) as Product[],
@@ -127,6 +135,8 @@ export function SuperfluidoApp() {
       tracks: (tracks.data ?? []) as Track[],
       profiles: (profiles.data ?? []) as ArtistProfile[],
       vault: (vault.data ?? []) as VaultFile[],
+      folders: (folders.data ?? []) as VaultFolder[],
+      tasks: (tasks.data ?? []) as KanbanTask[],
     });
   }
 
@@ -233,7 +243,10 @@ export function SuperfluidoApp() {
           <Profiles profiles={state.profiles} user={user} reload={reload} onError={setNotice} />
         </div>
         <div className={view === "vault" ? "" : "hidden"}>
-          <Vault files={state.vault} user={user} reload={reload} onError={setNotice} />
+          <Vault files={state.vault} folders={state.folders} user={user} reload={reload} onError={setNotice} />
+        </div>
+        <div className={view === "kanban" ? "" : "hidden"}>
+          <KanbanBoard tasks={state.tasks} user={user} reload={reload} onError={setNotice} />
         </div>
       </section>
     </main>
@@ -1312,28 +1325,47 @@ function Profiles({
 
 // ─── Vault ────────────────────────────────────────────────────────────────────
 
-const VAULT_FOLDERS = ["Tutti", "Press", "Live", "Amministrazione", "Altro"] as const;
-type VaultFolder = (typeof VAULT_FOLDERS)[number];
-
 function Vault({
   files,
+  folders,
   user,
   reload,
   onError,
 }: {
   files: VaultFile[];
+  folders: VaultFolder[];
   user: AppUser;
   reload: () => Promise<void>;
   onError: (msg: string) => void;
 }) {
-  const [activeFolder, setActiveFolder] = useState<VaultFolder>("Tutti");
+  const [activeFolder, setActiveFolder] = useState<string>("Tutti");
   const [uploading, setUploading] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showNewFolder, setShowNewFolder] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const folderNames = folders.map((f) => f.nome);
+  const allFolderTabs = ["Tutti", ...folderNames];
+
   const filtered = activeFolder === "Tutti" ? files : files.filter((f) => f.cartella === activeFolder);
-  const folderCount = (folder: VaultFolder) =>
+  const folderCount = (folder: string) =>
     folder === "Tutti" ? files.length : files.filter((f) => f.cartella === folder).length;
+
+  async function createFolder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const nome = String(form.get("nome") ?? "").trim();
+    if (!nome) return;
+    try {
+      const { error } = await getSupabase().from("vault_cartelle").insert({ nome, creato_da: user.id });
+      if (error) throw error;
+      event.currentTarget.reset();
+      setShowNewFolder(false);
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nella creazione della cartella.");
+    }
+  }
 
   async function deleteFile(file: VaultFile) {
     try {
@@ -1426,8 +1458,32 @@ function Vault({
       <div className="grid gap-5 lg:grid-cols-[200px_1fr]">
         {/* Left: folder nav */}
         <div className="glass h-fit rounded-md p-4">
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-white/30">Cartelle</p>
-          {VAULT_FOLDERS.map((folder) => (
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">Cartelle</p>
+            <button
+              onClick={() => setShowNewFolder(!showNewFolder)}
+              className="inline-flex h-6 w-6 items-center justify-center rounded border border-white/12 text-white/40 hover:text-white"
+              title="Nuova cartella"
+            >
+              <Plus size={12} />
+            </button>
+          </div>
+
+          {showNewFolder && (
+            <form onSubmit={createFolder} className="mb-3 flex gap-1">
+              <input
+                name="nome"
+                required
+                placeholder="Nome cartella"
+                className="field min-w-0 flex-1 rounded px-2 py-1.5 text-xs"
+              />
+              <button type="submit" className="rounded bg-orange-500 px-2 py-1.5 text-xs font-black text-black">
+                +
+              </button>
+            </form>
+          )}
+
+          {allFolderTabs.map((folder) => (
             <button
               key={folder}
               onClick={() => setActiveFolder(folder)}
@@ -1501,6 +1557,178 @@ function Vault({
             </table>
           )}
         </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Kanban ───────────────────────────────────────────────────────────────────
+
+const KANBAN_STATI = ["Da Fare", "In Corso", "Completato"] as const;
+type KanbanStato = (typeof KANBAN_STATI)[number];
+
+function KanbanBoard({
+  tasks,
+  user,
+  reload,
+  onError,
+}: {
+  tasks: KanbanTask[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function createTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError(null);
+    const data = new FormData(event.currentTarget);
+    const titolo = String(data.get("titolo") ?? "").trim();
+    if (!titolo) return;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from("tasks_kanban").insert({
+        titolo,
+        stato: String(data.get("stato") ?? "Da Fare"),
+        scadenza: String(data.get("scadenza") ?? "") || null,
+        assegnato_a: user.email,
+      });
+      if (error) throw error;
+      event.currentTarget.reset();
+      await reload();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Errore nella creazione del task.");
+    }
+  }
+
+  async function moveTask(task: KanbanTask, direction: "prev" | "next") {
+    const idx = KANBAN_STATI.indexOf(task.stato as KanbanStato);
+    const nextIdx = direction === "next" ? idx + 1 : idx - 1;
+    if (nextIdx < 0 || nextIdx >= KANBAN_STATI.length) return;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from("tasks_kanban")
+        .update({ stato: KANBAN_STATI[nextIdx] })
+        .eq("id", task.id);
+      if (error) throw error;
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore aggiornamento stato.");
+    }
+  }
+
+  async function deleteTask(task: KanbanTask) {
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from("tasks_kanban").delete().eq("id", task.id);
+      if (error) throw error;
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore eliminazione task.");
+    }
+  }
+
+  return (
+    <>
+      <ModuleHeader
+        title="Task Board"
+        text="Kanban per la gestione dei task del collettivo — Da Fare, In Corso, Completato."
+        icon={ClipboardList}
+      />
+
+      <form onSubmit={createTask} className="glass mb-6 rounded-md p-5">
+        <p className="mb-4 font-black text-white">Nuovo task</p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Input name="titolo" label="Titolo" placeholder="Es. Mixare Traccia 3" required />
+          <Select name="stato" label="Stato iniziale" options={[...KANBAN_STATI]} />
+          <Input name="scadenza" label="Scadenza (opzionale)" type="date" />
+        </div>
+        <FormError text={formError} />
+        <div className="mt-4">
+          <button
+            type="submit"
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-5 py-2.5 text-sm font-black text-black transition hover:bg-orange-300"
+          >
+            <Plus size={16} />
+            Aggiungi task
+          </button>
+        </div>
+      </form>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {KANBAN_STATI.map((stato) => {
+          const col = tasks.filter((t) => t.stato === stato);
+          const colColors: Record<KanbanStato, string> = {
+            "Da Fare": "border-white/10 bg-white/[0.025]",
+            "In Corso": "border-orange-400/20 bg-orange-500/[0.05]",
+            "Completato": "border-emerald-400/20 bg-emerald-500/[0.05]",
+          };
+          const dotColors: Record<KanbanStato, string> = {
+            "Da Fare": "bg-white/30",
+            "In Corso": "bg-orange-400",
+            "Completato": "bg-emerald-400",
+          };
+          return (
+            <div key={stato} className={`rounded-md border p-4 ${colColors[stato]}`}>
+              <div className="mb-4 flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${dotColors[stato]}`} />
+                <p className="text-xs font-bold uppercase tracking-widest text-white/55">{stato}</p>
+                <span className="ml-auto font-mono text-xs text-white/30">{col.length}</span>
+              </div>
+
+              <div className="space-y-3">
+                {col.length === 0 && (
+                  <p className="py-6 text-center text-xs text-white/20">Nessun task</p>
+                )}
+                {col.map((task) => {
+                  const stIdx = KANBAN_STATI.indexOf(task.stato as KanbanStato);
+                  return (
+                    <div key={task.id} className="glass rounded-md p-3">
+                      <p className="text-sm font-bold text-white">{task.titolo}</p>
+                      {task.scadenza && (
+                        <p className="mt-1 font-mono text-[10px] text-white/35">
+                          Scadenza: {new Date(task.scadenza).toLocaleDateString("it-IT")}
+                        </p>
+                      )}
+                      {task.assegnato_a && (
+                        <p className="mt-0.5 text-[10px] text-white/30">{task.assegnato_a}</p>
+                      )}
+                      <div className="mt-3 flex items-center justify-between gap-1">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => moveTask(task, "prev")}
+                            disabled={stIdx === 0}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-white/10 text-white/40 hover:text-white disabled:opacity-20"
+                            title="Sposta indietro"
+                          >
+                            <ChevronLeft size={13} />
+                          </button>
+                          <button
+                            onClick={() => moveTask(task, "next")}
+                            disabled={stIdx === KANBAN_STATI.length - 1}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-white/10 text-white/40 hover:text-white disabled:opacity-20"
+                            title="Sposta avanti"
+                          >
+                            <ChevronRight size={13} />
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => deleteTask(task)}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-400/20 text-red-400/50 hover:bg-red-500/10 hover:text-red-300"
+                          title="Elimina"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </>
   );

@@ -61,3 +61,20 @@ export type VaultFile = {
   file_url: string;
   created_at?: string;
 };
+
+export type VaultFolder = {
+  id: string | number;
+  nome: string;
+  creato_da?: string;
+  created_at?: string;
+};
+
+export type KanbanTask = {
+  id: string | number;
+  titolo: string;
+  descrizione?: string | null;
+  assegnato_a?: string | null;
+  stato: string;
+  scadenza?: string | null;
+  created_at?: string;
+};

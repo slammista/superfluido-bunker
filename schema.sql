@@ -93,6 +93,8 @@ ALTER TABLE album_progetti    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tracce_audio      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profili_artisti   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vault_documenti   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vault_cartelle    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks_kanban      ENABLE ROW LEVEL SECURITY;
 
 -- =========================================================
 -- POLICY (DROP IF EXISTS prima di creare — idempotente)
@@ -106,6 +108,8 @@ DROP POLICY IF EXISTS "auth_all" ON album_progetti;
 DROP POLICY IF EXISTS "auth_all" ON tracce_audio;
 DROP POLICY IF EXISTS "auth_all" ON profili_artisti;
 DROP POLICY IF EXISTS "auth_all" ON vault_documenti;
+DROP POLICY IF EXISTS "auth_all" ON vault_cartelle;
+DROP POLICY IF EXISTS "auth_all" ON tasks_kanban;
 
 CREATE POLICY "auth_all" ON user_roles        FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_all" ON products          FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -115,6 +119,8 @@ CREATE POLICY "auth_all" ON album_progetti    FOR ALL TO authenticated USING (tr
 CREATE POLICY "auth_all" ON tracce_audio      FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_all" ON profili_artisti   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_all" ON vault_documenti   FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_all" ON vault_cartelle    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "auth_all" ON tasks_kanban      FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- =========================================================
 -- VERIFICA FINALE (eseguila dopo per confermare)
@@ -122,9 +128,10 @@ CREATE POLICY "auth_all" ON vault_documenti   FOR ALL TO authenticated USING (tr
 -- SELECT table_name FROM information_schema.tables
 -- WHERE table_schema = 'public' ORDER BY table_name;
 --
--- Deve restituire 8 righe:
+-- Deve restituire 10 righe:
 -- album_progetti, eventi_calendario, product_variants,
--- products, profili_artisti, tracce_audio, user_roles, vault_documenti
+-- products, profili_artisti, tasks_kanban, tracce_audio,
+-- user_roles, vault_cartelle, vault_documenti
 
 -- =========================================================
 -- STORAGE BUCKET
