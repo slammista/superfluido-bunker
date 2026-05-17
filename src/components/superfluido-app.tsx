@@ -13,6 +13,7 @@ import {
   Download,
   FileAudio,
   FolderOpen,
+  FolderPlus,
   Home,
   List,
   Loader2,
@@ -2007,6 +2008,7 @@ function Profiles({ profiles, user, reload, onToast }: { profiles: ArtistProfile
 }
 
 function Vault({ files, folders, user, reload, onToast }: { files: VaultFile[]; folders: VaultFolder[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
+  const [vaultView, setVaultView] = useState<"documenti" | "drive">("documenti");
   const [uploading, setUploading] = useState(false);
   const [activeFolder, setActiveFolder] = useState<string>("Tutti");
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -2081,7 +2083,25 @@ function Vault({ files, folders, user, reload, onToast }: { files: VaultFile[]; 
   return (
     <>
       <ModuleHeader title="Vault" text="Documenti, contratti e asset organizzati per cartelle." icon={Archive} />
-      <div className="grid gap-5 lg:grid-cols-[180px_1fr_300px]">
+
+      <div className="mb-5 flex items-center gap-2">
+        <button
+          onClick={() => setVaultView("documenti")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${vaultView === "documenti" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <Archive size={14} />
+          Documenti
+        </button>
+        <button
+          onClick={() => setVaultView("drive")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${vaultView === "drive" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <FolderOpen size={14} />
+          Drive
+        </button>
+      </div>
+
+      {vaultView === "documenti" && <div className="grid gap-5 lg:grid-cols-[180px_1fr_300px]">
         {/* Sidebar cartelle */}
         <div className="glass h-fit rounded-md p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -2161,7 +2181,191 @@ function Vault({ files, folders, user, reload, onToast }: { files: VaultFile[]; 
           </button>
         </form>
       </div>
+      }
+
+      {vaultView === "drive" && <DriveSection user={user} onToast={onToast} />}
     </>
+  );
+}
+
+// ── DriveSection ──────────────────────────────────────────────
+
+function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string, kind?: "error" | "success") => void }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [breadcrumb, setBreadcrumb] = useState<{ id: string | null; name: string }[]>([{ id: null, name: "Drive" }]);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+
+  useEffect(() => {
+    loadItems();
+  }, [currentFolderId]);
+
+  async function loadItems() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/drive/list", { method: "POST", body: JSON.stringify({ folderId: currentFolderId }) });
+      if (!res.ok) throw new Error("Failed to load Drive items");
+      const data = (await res.json()) as { items: any[] };
+      const sorted = (data.items || []).sort((a, b) => {
+        if (a.mimeType === "application/vnd.google-apps.folder" && b.mimeType !== "application/vnd.google-apps.folder") return -1;
+        if (a.mimeType !== "application/vnd.google-apps.folder" && b.mimeType === "application/vnd.google-apps.folder") return 1;
+        return a.name.localeCompare(b.name);
+      });
+      setItems(sorted);
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Errore caricamento Drive");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function navigate(folderId: string, folderName: string) {
+    setCurrentFolderId(folderId);
+    setBreadcrumb([...breadcrumb, { id: folderId, name: folderName }]);
+  }
+
+  function goBack() {
+    if (breadcrumb.length <= 1) return;
+    const newBreadcrumb = breadcrumb.slice(0, -1);
+    setBreadcrumb(newBreadcrumb);
+    setCurrentFolderId(newBreadcrumb[newBreadcrumb.length - 1].id);
+  }
+
+  function goHome() {
+    setBreadcrumb([{ id: null, name: "Drive" }]);
+    setCurrentFolderId(null);
+  }
+
+  async function createFolder(name: string) {
+    setCreatingFolder(true);
+    try {
+      const res = await fetch("/api/drive/create-folder", { method: "POST", body: JSON.stringify({ folderName: name, parentId: currentFolderId }) });
+      if (!res.ok) throw new Error("Errore creazione cartella");
+      onToast("Cartella creata.", "success");
+      setNewFolderName("");
+      await loadItems();
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Errore creazione cartella");
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
+  async function deleteItem(itemId: string, name: string) {
+    if (!confirm(`Eliminare "${name}"?`)) return;
+    try {
+      const res = await fetch("/api/drive/delete", { method: "POST", body: JSON.stringify({ itemId }) });
+      if (!res.ok) throw new Error("Errore eliminazione");
+      onToast("Eliminato.", "success");
+      await loadItems();
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Errore eliminazione");
+    }
+  }
+
+  async function renameItem(itemId: string, newName: string) {
+    try {
+      const res = await fetch("/api/drive/rename", { method: "POST", body: JSON.stringify({ itemId, newName }) });
+      if (!res.ok) throw new Error("Errore rinomina");
+      onToast("Rinominato.", "success");
+      setRenaming(null);
+      await loadItems();
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Errore rinomina");
+    }
+  }
+
+  const isFolder = (mimeType: string) => mimeType === "application/vnd.google-apps.folder";
+
+  return (
+    <div className="space-y-4">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm text-white/50">
+        {breadcrumb.map((item, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            {idx > 0 && <span>/</span>}
+            <button onClick={() => (item.id === null ? goHome() : navigate(item.id, item.name))} className="text-white hover:text-orange-300">
+              {item.name}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Create folder form */}
+      <div className="glass rounded-md p-4">
+        <div className="flex gap-2">
+          <input value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder="Nome nuova cartella" className="field flex-1 rounded px-3 py-2 text-sm" />
+          <button
+            onClick={() => newFolderName.trim() && createFolder(newFolderName)}
+            disabled={creatingFolder || !newFolderName.trim()}
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-black hover:bg-orange-300 disabled:opacity-50"
+          >
+            <FolderPlus size={14} />
+            Crea
+          </button>
+        </div>
+      </div>
+
+      {/* Items list */}
+      <div className="glass rounded-md p-5">
+        {loading ? (
+          <p className="py-10 text-center text-sm text-white/40">Caricamento...</p>
+        ) : items.length === 0 ? (
+          <p className="py-10 text-center text-sm text-white/40">Cartella vuota</p>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item) => (
+              <div key={item.id} className="glass flex items-center justify-between rounded-md p-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  {isFolder(item.mimeType) ? <FolderOpen size={16} className="shrink-0 text-orange-300" /> : <FileAudio size={16} className="shrink-0 text-white/40" />}
+                  {renaming === item.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={item.name}
+                      onBlur={(e) => (e.target.value.trim() ? renameItem(item.id, e.target.value) : setRenaming(null))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && e.currentTarget.value.trim()) renameItem(item.id, e.currentTarget.value);
+                        if (e.key === "Escape") setRenaming(null);
+                      }}
+                      className="field flex-1 rounded px-2 py-1 text-sm"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => isFolder(item.mimeType) && navigate(item.id, item.name)}
+                      className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-white hover:text-orange-200"
+                    >
+                      {item.name}
+                    </button>
+                  )}
+                </div>
+                <div className="ml-2 flex shrink-0 gap-1">
+                  {!isFolder(item.mimeType) && item.webContentLink && (
+                    <a href={item.webContentLink} target="_blank" rel="noreferrer" className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300">
+                      <Download size={14} />
+                    </a>
+                  )}
+                  <button onClick={() => setRenaming(item.id)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300">
+                    <Pencil size={14} />
+                  </button>
+                  <button onClick={() => deleteItem(item.id, item.name)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-red-400/20 text-red-400/50 hover:bg-red-500/10 hover:text-red-300">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {breadcrumb.length > 1 && (
+        <button onClick={goBack} className="text-sm text-white/50 hover:text-white">
+          ← Torna indietro
+        </button>
+      )}
+    </div>
   );
 }
 
