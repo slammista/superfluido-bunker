@@ -1,9 +1,10 @@
 -- SUPERFLUIDO Bunker — Schema SQL
--- Esegui questo script nel SQL Editor del tuo progetto Supabase (una volta sola).
--- Dashboard > SQL Editor > New query > Incolla > Run
+-- Esegui questo script nel SQL Editor del tuo progetto Supabase.
+-- È idempotente: puoi rieseguirlo anche se alcune tabelle/policy esistono già.
+-- Dashboard > SQL Editor > New query > Incolla tutto > Run
 
 -- =========================================================
--- TABELLE
+-- TABELLE (CREATE IF NOT EXISTS — sicuro se già presenti)
 -- =========================================================
 
 CREATE TABLE IF NOT EXISTS user_roles (
@@ -42,21 +43,21 @@ CREATE TABLE IF NOT EXISTS eventi_calendario (
 );
 
 CREATE TABLE IF NOT EXISTS album_progetti (
-  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  creato_da      uuid REFERENCES auth.users,
-  nome_album     text NOT NULL,
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  creato_da       uuid REFERENCES auth.users,
+  nome_album      text NOT NULL,
   cover_image_url text,
-  created_at     timestamptz DEFAULT now()
+  created_at      timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS tracce_audio (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  caricato_da   uuid REFERENCES auth.users,
-  album_id      uuid REFERENCES album_progetti ON DELETE SET NULL,
-  nome_traccia  text NOT NULL,
-  fase          text DEFAULT 'Demo',
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  caricato_da    uuid REFERENCES auth.users,
+  album_id       uuid REFERENCES album_progetti ON DELETE SET NULL,
+  nome_traccia   text NOT NULL,
+  fase           text DEFAULT 'Demo',
   audio_file_url text,
-  created_at    timestamptz DEFAULT now()
+  created_at     timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS profili_artisti (
@@ -81,18 +82,31 @@ CREATE TABLE IF NOT EXISTS vault_documenti (
 
 -- =========================================================
 -- ROW LEVEL SECURITY
+-- (ENABLE è no-op se già abilitato — nessun errore)
 -- =========================================================
 
-ALTER TABLE user_roles       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE products         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_roles        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE product_variants  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE eventi_calendario ENABLE ROW LEVEL SECURITY;
-ALTER TABLE album_progetti   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tracce_audio     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE profili_artisti  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE vault_documenti  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE album_progetti    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tracce_audio      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profili_artisti   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vault_documenti   ENABLE ROW LEVEL SECURITY;
 
--- Lettura e scrittura per tutti gli utenti autenticati
+-- =========================================================
+-- POLICY (DROP IF EXISTS prima di creare — idempotente)
+-- =========================================================
+
+DROP POLICY IF EXISTS "auth_all" ON user_roles;
+DROP POLICY IF EXISTS "auth_all" ON products;
+DROP POLICY IF EXISTS "auth_all" ON product_variants;
+DROP POLICY IF EXISTS "auth_all" ON eventi_calendario;
+DROP POLICY IF EXISTS "auth_all" ON album_progetti;
+DROP POLICY IF EXISTS "auth_all" ON tracce_audio;
+DROP POLICY IF EXISTS "auth_all" ON profili_artisti;
+DROP POLICY IF EXISTS "auth_all" ON vault_documenti;
+
 CREATE POLICY "auth_all" ON user_roles        FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_all" ON products          FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_all" ON product_variants  FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -103,9 +117,17 @@ CREATE POLICY "auth_all" ON profili_artisti   FOR ALL TO authenticated USING (tr
 CREATE POLICY "auth_all" ON vault_documenti   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- =========================================================
+-- VERIFICA FINALE (eseguila dopo per confermare)
+-- =========================================================
+-- SELECT table_name FROM information_schema.tables
+-- WHERE table_schema = 'public' ORDER BY table_name;
+--
+-- Deve restituire 8 righe:
+-- album_progetti, eventi_calendario, product_variants,
+-- products, profili_artisti, tracce_audio, user_roles, vault_documenti
+
+-- =========================================================
 -- STORAGE BUCKET
 -- =========================================================
--- Bucket già esistente: superfluido_bucket (con cartelle vault/ e audio/ dentro)
--- Il codice usa: supabase.storage.from("superfluido_bucket").upload("audio/...", file)
---                supabase.storage.from("superfluido_bucket").upload("vault/...", file)
--- Assicurarsi che il bucket sia pubblico (Public bucket: ON) nel dashboard.
+-- Bucket esistente: superfluido_bucket (cartelle vault/ e audio/ dentro)
+-- Assicurarsi che sia Public: ON nel dashboard Supabase.
