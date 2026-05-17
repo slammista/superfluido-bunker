@@ -5,15 +5,19 @@ import {
   Archive,
   Bot,
   CalendarDays,
+  ChevronLeft,
   ChevronRight,
   Disc3,
   Download,
   FileAudio,
   FolderOpen,
   Home,
+  LayoutGrid,
+  List,
   Loader2,
   LogOut,
   Package,
+  Play,
   Plus,
   Search,
   Send,
@@ -26,7 +30,6 @@ import {
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
-import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, Product, Role, Track, VaultFile } from "@/lib/types";
 
 type View = "home" | "inventory" | "calendar" | "projects" | "press" | "profile" | "vault";
@@ -57,12 +60,12 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
 ];
 
 const emptyState: AppState = {
-  products: sampleProducts,
-  events: sampleEvents,
-  albums: sampleAlbums,
-  tracks: sampleTracks,
-  profiles: sampleProfiles,
-  vault: sampleVault,
+  products: [],
+  events: [],
+  albums: [],
+  tracks: [],
+  profiles: [],
+  vault: [],
 };
 
 export function SuperfluidoApp() {
@@ -79,11 +82,7 @@ export function SuperfluidoApp() {
       try {
         const supabase = getSupabase();
         const { data } = await supabase.auth.getSession();
-
-        if (!mounted) {
-          return;
-        }
-
+        if (!mounted) return;
         if (data.session?.user) {
           const role = await fetchRole(data.session.user.id);
           const appUser = {
@@ -95,18 +94,14 @@ export function SuperfluidoApp() {
           await loadWorkspace(appUser.id);
         }
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "Supabase non configurato. Uso dati demo.");
+        setNotice(error instanceof Error ? error.message : "Supabase non configurato.");
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        if (mounted) setLoading(false);
       }
     }
 
     boot();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   async function fetchRole(userId: string) {
@@ -117,7 +112,6 @@ export function SuperfluidoApp() {
 
   async function loadWorkspace(userId: string) {
     const supabase = getSupabase();
-
     const [products, events, albums, tracks, profiles, vault] = await Promise.all([
       supabase.from("products").select("*, product_variants(*)"),
       supabase.from("eventi_calendario").select("*").order("data_evento"),
@@ -126,14 +120,13 @@ export function SuperfluidoApp() {
       supabase.from("profili_artisti").select("*"),
       supabase.from("vault_documenti").select("*").order("created_at", { ascending: false }),
     ]);
-
     setState({
-      products: products.data?.length ? (products.data as Product[]) : sampleProducts,
-      events: events.data?.length ? (events.data as CalendarEvent[]) : sampleEvents,
-      albums: albums.data?.length ? (albums.data as Album[]) : sampleAlbums,
-      tracks: tracks.data?.length ? (tracks.data as Track[]) : sampleTracks,
-      profiles: profiles.data?.length ? (profiles.data as ArtistProfile[]) : sampleProfiles,
-      vault: vault.data?.length ? (vault.data as VaultFile[]) : sampleVault,
+      products: (products.data ?? []) as Product[],
+      events: (events.data ?? []) as CalendarEvent[],
+      albums: (albums.data ?? []) as Album[],
+      tracks: (tracks.data ?? []) as Track[],
+      profiles: (profiles.data ?? []) as ArtistProfile[],
+      vault: (vault.data ?? []) as VaultFile[],
     });
   }
 
@@ -143,12 +136,8 @@ export function SuperfluidoApp() {
     try {
       const supabase = getSupabase();
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        throw error;
-      }
-      if (!data.user) {
-        throw new Error("Login non riuscito.");
-      }
+      if (error) throw error;
+      if (!data.user) throw new Error("Login non riuscito.");
       const role = await fetchRole(data.user.id);
       const appUser = { id: data.user.id, email: data.user.email ?? email, role: role ?? "membro" };
       setUser(appUser);
@@ -173,6 +162,8 @@ export function SuperfluidoApp() {
   if (!user) {
     return <LoginScreen loading={loading} notice={notice} onLogin={handleLogin} />;
   }
+
+  const reload = () => loadWorkspace(user.id);
 
   return (
     <main className="min-h-screen">
@@ -227,27 +218,29 @@ export function SuperfluidoApp() {
           <Overview state={state} user={user} goTo={setView} />
         </div>
         <div className={view === "inventory" ? "" : "hidden"}>
-          <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} />
+          <Inventory products={state.products} user={user} reload={reload} onError={setNotice} />
         </div>
         <div className={view === "calendar" ? "" : "hidden"}>
-          <CalendarModule events={state.events} user={user} reload={() => loadWorkspace(user.id)} />
+          <CalendarModule events={state.events} user={user} reload={reload} onError={setNotice} />
         </div>
         <div className={view === "projects" ? "" : "hidden"}>
-          <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} />
+          <Projects albums={state.albums} tracks={state.tracks} user={user} reload={reload} onError={setNotice} />
         </div>
         <div className={view === "press" ? "" : "hidden"}>
           <PressKit state={state} />
         </div>
         <div className={view === "profile" ? "" : "hidden"}>
-          <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} />
+          <Profiles profiles={state.profiles} user={user} reload={reload} onError={setNotice} />
         </div>
         <div className={view === "vault" ? "" : "hidden"}>
-          <Vault files={state.vault} user={user} reload={() => loadWorkspace(user.id)} />
+          <Vault files={state.vault} user={user} reload={reload} onError={setNotice} />
         </div>
       </section>
     </main>
   );
 }
+
+// ─── Login ────────────────────────────────────────────────────────────────────
 
 function LoginScreen({
   loading,
@@ -277,15 +270,11 @@ function LoginScreen({
         </div>
         <h1 className="text-center text-2xl font-black tracking-tight text-white">Bunker Login</h1>
         <p className="mt-2 text-center text-sm text-white/55">Accesso operativo a magazzino, studio, calendario e AI press kit.</p>
-
         {notice ? <Notice text={notice} /> : null}
-
         <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" />
-
+        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="utente@superfluido.it" />
         <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" />
-
+        <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Password" />
         <button
           disabled={loading}
           className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
@@ -297,6 +286,8 @@ function LoginScreen({
     </main>
   );
 }
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
 
 function NavButton({
   item,
@@ -314,9 +305,7 @@ function NavButton({
     <button
       onClick={onClick}
       className={`inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-bold transition ${
-        active
-          ? "bg-orange-500 text-black"
-          : "text-white/62 hover:bg-white/8 hover:text-white"
+        active ? "bg-orange-500 text-black" : "text-white/62 hover:bg-white/8 hover:text-white"
       } ${compact ? "border border-white/10 bg-white/[0.04]" : ""}`}
     >
       <Icon size={15} />
@@ -334,7 +323,17 @@ function Notice({ text }: { text: string }) {
   );
 }
 
-function ModuleHeader({ title, text, icon: Icon }: { title: string; text: string; icon: typeof Home }) {
+function ModuleHeader({
+  title,
+  text,
+  icon: Icon,
+  actions,
+}: {
+  title: string;
+  text: string;
+  icon: typeof Home;
+  actions?: React.ReactNode;
+}) {
   return (
     <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
       <div>
@@ -344,16 +343,19 @@ function ModuleHeader({ title, text, icon: Icon }: { title: string; text: string
         <h2 className="text-3xl font-black tracking-tight text-white md:text-5xl">{title}</h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-white/56">{text}</p>
       </div>
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
 
+// ─── Overview ─────────────────────────────────────────────────────────────────
+
 function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo: (view: View) => void }) {
   const totalStock = state.products.reduce(
-    (sum, product) => sum + (product.product_variants ?? []).reduce((variantSum, variant) => variantSum + Number(variant.stock_quantity ?? 0), 0),
+    (sum, p) => sum + (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0),
     0,
   );
-  const lowStock = state.products.filter((product) => (product.product_variants ?? []).some((variant) => Number(variant.stock_quantity) < 6));
+  const lowStock = state.products.filter((p) => (p.product_variants ?? []).some((v) => Number(v.stock_quantity) < 6));
 
   return (
     <>
@@ -423,32 +425,47 @@ function Metric({ title, value, tone }: { title: string; value: string; tone: "o
   );
 }
 
-function Inventory({ products, user, reload }: { products: Product[]; user: AppUser; reload: () => Promise<void> }) {
+// ─── Inventory ────────────────────────────────────────────────────────────────
+
+function Inventory({
+  products,
+  user,
+  reload,
+  onError,
+}: {
+  products: Product[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
   const [query, setQuery] = useState("");
-  const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = products.filter((p) => `${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
 
   async function addDemoProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const name = String(data.get("name") ?? "");
-    const category = String(data.get("category") ?? "Merch");
-    const stock = Number(data.get("stock") ?? 0);
-
-    const supabase = getSupabase();
-    const created = await supabase.from("products").insert({
-      name,
-      category,
-      base_price_sell: Number(data.get("price") ?? 0),
-      base_price_cost: 0,
-    }).select().single();
-
-    if (created.data) {
+    try {
+      const supabase = getSupabase();
+      const created = await supabase
+        .from("products")
+        .insert({
+          name: String(data.get("name") ?? ""),
+          category: String(data.get("category") ?? "Merch"),
+          base_price_sell: Number(data.get("price") ?? 0),
+          base_price_cost: 0,
+        })
+        .select()
+        .single();
+      if (created.error) throw created.error;
       await supabase.from("product_variants").insert({
         product_id: created.data.id,
         variant_name: "Default",
-        stock_quantity: stock,
+        stock_quantity: Number(data.get("stock") ?? 0),
       });
+      event.currentTarget.reset();
       await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nella creazione del prodotto.");
     }
   }
 
@@ -459,35 +476,39 @@ function Inventory({ products, user, reload }: { products: Product[]; user: AppU
         <div className="glass rounded-md p-5">
           <div className="mb-5 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
             <Search size={18} className="text-white/40" />
-            <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
-              <thead className="text-xs uppercase tracking-[0.16em] text-white/38">
-                <tr>
-                  <th className="border-b border-white/10 py-3">Prodotto</th>
-                  <th className="border-b border-white/10 py-3">Categoria</th>
-                  <th className="border-b border-white/10 py-3">Varianti</th>
-                  <th className="border-b border-white/10 py-3 text-right">Prezzo</th>
-                  <th className="border-b border-white/10 py-3 text-right">Stock</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((product) => {
-                  const stock = (product.product_variants ?? []).reduce((sum, item) => sum + Number(item.stock_quantity ?? 0), 0);
-                  return (
-                    <tr key={product.id} className="border-b border-white/7 text-white/78">
-                      <td className="py-4 font-bold text-white">{product.name}</td>
-                      <td className="py-4">{product.category ?? "Generale"}</td>
-                      <td className="py-4">{(product.product_variants ?? []).map((variant) => `${variant.variant_name}: ${variant.stock_quantity}`).join(" · ")}</td>
-                      <td className="py-4 text-right font-mono">{formatEuro(product.base_price_sell)}</td>
-                      <td className={`py-4 text-right font-mono font-black ${stock < 6 ? "text-red-300" : "text-emerald-300"}`}>{stock}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {filtered.length === 0 ? (
+            <p className="py-12 text-center text-sm text-white/35">Nessun prodotto in magazzino. Aggiungine uno con il form a destra.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+                <thead className="text-xs uppercase tracking-[0.16em] text-white/38">
+                  <tr>
+                    <th className="border-b border-white/10 py-3">Prodotto</th>
+                    <th className="border-b border-white/10 py-3">Categoria</th>
+                    <th className="border-b border-white/10 py-3">Varianti</th>
+                    <th className="border-b border-white/10 py-3 text-right">Prezzo</th>
+                    <th className="border-b border-white/10 py-3 text-right">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((product) => {
+                    const stock = (product.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
+                    return (
+                      <tr key={product.id} className="border-b border-white/7 text-white/78">
+                        <td className="py-4 font-bold text-white">{product.name}</td>
+                        <td className="py-4">{product.category ?? "Generale"}</td>
+                        <td className="py-4">{(product.product_variants ?? []).map((v) => `${v.variant_name}: ${v.stock_quantity}`).join(" · ")}</td>
+                        <td className="py-4 text-right font-mono">{formatEuro(product.base_price_sell)}</td>
+                        <td className={`py-4 text-right font-mono font-black ${stock < 6 ? "text-red-300" : "text-emerald-300"}`}>{stock}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <form onSubmit={addDemoProduct} className="glass rounded-md p-5">
@@ -505,55 +526,169 @@ function Inventory({ products, user, reload }: { products: Product[]; user: AppU
   );
 }
 
-function CalendarModule({ events, user, reload }: { events: CalendarEvent[]; user: AppUser; reload: () => Promise<void> }) {
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+
+type CalView = "grid" | "list" | "month";
+
+function CalendarModule({
+  events,
+  user,
+  reload,
+  onError,
+}: {
+  events: CalendarEvent[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [calView, setCalView] = useState<CalView>("grid");
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+
+  const MONTH_NAMES = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+
   async function createEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const date = `${form.get("date")}T${form.get("time") || "20:00"}:00+02:00`;
-    await getSupabase().from("eventi_calendario").insert({
-      creato_da: user.id,
-      titolo: form.get("title"),
-      tipo_evento: form.get("type"),
-      data_evento: date,
-      luogo: form.get("place"),
-      note: form.get("note"),
-      membri_coinvolti: [],
-      colore: form.get("color") || "#ff6b35",
-    });
-    event.currentTarget.reset();
-    await reload();
+    try {
+      const { error } = await getSupabase().from("eventi_calendario").insert({
+        creato_da: user.id,
+        titolo: form.get("title"),
+        tipo_evento: form.get("type"),
+        data_evento: `${form.get("date")}T${form.get("time") || "20:00"}:00+02:00`,
+        luogo: form.get("place"),
+        note: form.get("note"),
+        membri_coinvolti: [],
+        colore: form.get("color") || "#ff6b35",
+      });
+      if (error) throw error;
+      event.currentTarget.reset();
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nella creazione dell'evento.");
+    }
   }
 
   async function deleteEvent(id: string | number) {
-    await getSupabase().from("eventi_calendario").delete().eq("id", id);
-    await reload();
+    try {
+      const { error } = await getSupabase().from("eventi_calendario").delete().eq("id", id);
+      if (error) throw error;
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nell'eliminazione dell'evento.");
+    }
   }
+
+  const sorted = [...events].sort((a, b) => new Date(a.data_evento).getTime() - new Date(b.data_evento).getTime());
+
+  const viewToggle = (
+    <div className="flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] p-1">
+      {([
+        { id: "grid" as CalView, icon: LayoutGrid, label: "Griglia" },
+        { id: "list" as CalView, icon: List, label: "Lista" },
+        { id: "month" as CalView, icon: CalendarDays, label: "Mese" },
+      ] as const).map(({ id, icon: Icon, label }) => (
+        <button
+          key={id}
+          onClick={() => setCalView(id)}
+          title={label}
+          className={`inline-flex h-8 w-8 items-center justify-center rounded transition ${
+            calView === id ? "bg-orange-500 text-black" : "text-white/50 hover:text-white"
+          }`}
+        >
+          <Icon size={15} />
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <>
-      <ModuleHeader title="Calendario" text="Vista eventi condivisa per live, release, interviste e sessioni studio." icon={CalendarDays} />
+      <ModuleHeader
+        title="Calendario"
+        text="Vista eventi condivisa per live, release, interviste e sessioni studio."
+        icon={CalendarDays}
+        actions={viewToggle}
+      />
+
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <div className="glass rounded-md p-5">
-          <div className="grid gap-3 md:grid-cols-2">
-            {events.map((event) => (
-              <article key={event.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                <div className="mb-4 h-1 rounded-full" style={{ background: event.colore ?? "#ff6b35" }} />
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">{event.tipo_evento}</p>
-                <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
-                <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
-                <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
-                <div className="mt-4 flex justify-end">
-                  <button
-                    onClick={() => deleteEvent(event.id)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
-                    title="Elimina evento"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+          {/* Month navigation (only in month view) */}
+          {calView === "month" && (
+            <div className="mb-4 flex items-center justify-between">
+              <button
+                onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(calYear - 1); } else setCalMonth(calMonth - 1); }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-white/60 hover:text-white"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <p className="font-bold text-white">{MONTH_NAMES[calMonth]} {calYear}</p>
+              <button
+                onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(calYear + 1); } else setCalMonth(calMonth + 1); }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-white/60 hover:text-white"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+
+          {/* Grid view */}
+          {calView === "grid" && (
+            events.length === 0 ? (
+              <p className="py-12 text-center text-sm text-white/35">Nessun evento. Aggiungi il primo con il form a destra.</p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {sorted.map((event) => (
+                  <EventCard key={event.id} event={event} onDelete={() => deleteEvent(event.id)} />
+                ))}
+              </div>
+            )
+          )}
+
+          {/* List view */}
+          {calView === "list" && (
+            events.length === 0 ? (
+              <p className="py-12 text-center text-sm text-white/35">Nessun evento.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[600px] border-collapse text-left text-sm">
+                  <thead className="text-xs uppercase tracking-[0.14em] text-white/38">
+                    <tr>
+                      <th className="border-b border-white/10 pb-3">Data</th>
+                      <th className="border-b border-white/10 pb-3">Tipo</th>
+                      <th className="border-b border-white/10 pb-3">Titolo</th>
+                      <th className="border-b border-white/10 pb-3">Luogo</th>
+                      <th className="border-b border-white/10 pb-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((event) => (
+                      <tr key={event.id} className="border-b border-white/7 text-white/75">
+                        <td className="py-3 font-mono text-xs text-orange-200">{formatDate(event.data_evento)}</td>
+                        <td className="py-3">{event.tipo_evento}</td>
+                        <td className="py-3 font-bold text-white">{event.titolo}</td>
+                        <td className="py-3">{event.luogo || "—"}</td>
+                        <td className="py-3 text-right">
+                          <button
+                            onClick={() => deleteEvent(event.id)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-400/25 text-red-300 hover:bg-red-500/10"
+                            title="Elimina"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+
+          {/* Month view */}
+          {calView === "month" && (
+            <MonthView events={events} month={calMonth} year={calYear} />
+          )}
         </div>
 
         <form onSubmit={createEvent} className="glass rounded-md p-5">
@@ -572,18 +707,147 @@ function CalendarModule({ events, user, reload }: { events: CalendarEvent[]; use
   );
 }
 
-function Projects({ albums, tracks, user, reload }: { albums: Album[]; tracks: Track[]; user: AppUser; reload: () => Promise<void> }) {
+function EventCard({ event, onDelete }: { event: CalendarEvent; onDelete: () => void }) {
+  return (
+    <article className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+      <div className="mb-4 h-1 rounded-full" style={{ background: event.colore ?? "#ff6b35" }} />
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">{event.tipo_evento}</p>
+      <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
+      <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
+      <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
+      <div className="mt-4 flex justify-end">
+        <button
+          onClick={onDelete}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
+          title="Elimina evento"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function MonthView({ events, month, year }: { events: CalendarEvent[]; month: number; year: number }) {
+  const DAYS = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfWeek = new Date(year, month, 1).getDay();
+  const startOffset = (firstDayOfWeek + 6) % 7;
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < startOffset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const today = new Date();
+  const isToday = (d: number) => today.getDate() === d && today.getMonth() === month && today.getFullYear() === year;
+
+  const eventsOnDay = (d: number) =>
+    events.filter((e) => {
+      const date = new Date(e.data_evento);
+      return date.getMonth() === month && date.getFullYear() === year && date.getDate() === d;
+    });
+
+  return (
+    <div>
+      <div className="mb-1 grid grid-cols-7">
+        {DAYS.map((d) => (
+          <div key={d} className="py-2 text-center text-xs font-bold uppercase tracking-wider text-white/35">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((day, i) => (
+          <div
+            key={i}
+            className={`min-h-[72px] rounded-md p-1.5 text-xs ${
+              day ? "bg-white/[0.03] hover:bg-white/[0.06]" : ""
+            } ${day && isToday(day) ? "ring-1 ring-orange-500/60" : ""}`}
+          >
+            {day && (
+              <>
+                <span className={`block text-right font-mono text-[11px] ${isToday(day) ? "font-bold text-orange-300" : "text-white/35"}`}>
+                  {day}
+                </span>
+                <div className="mt-0.5 space-y-0.5">
+                  {eventsOnDay(day).map((e) => (
+                    <div
+                      key={e.id}
+                      className="truncate rounded px-1 py-0.5 text-[9px] font-bold text-black"
+                      style={{ background: e.colore ?? "#ff6b35" }}
+                      title={e.titolo}
+                    >
+                      {e.titolo}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Studio Hub ───────────────────────────────────────────────────────────────
+
+type StudioView = "library" | "project";
+
+const ALBUM_GRADIENTS = [
+  "from-orange-600 to-red-900",
+  "from-violet-600 to-purple-900",
+  "from-sky-600 to-blue-900",
+  "from-emerald-600 to-teal-900",
+  "from-pink-600 to-rose-900",
+  "from-amber-600 to-orange-900",
+];
+
+function albumGradient(name: string) {
+  return ALBUM_GRADIENTS[(name.charCodeAt(0) ?? 0) % ALBUM_GRADIENTS.length];
+}
+
+function Projects({
+  albums,
+  tracks,
+  user,
+  reload,
+  onError,
+}: {
+  albums: Album[];
+  tracks: Track[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [studioView, setStudioView] = useState<StudioView>("library");
+  const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
+  const [showNewAlbum, setShowNewAlbum] = useState(false);
+  const [showAddTrack, setShowAddTrack] = useState(false);
   const [uploadingTrack, setUploadingTrack] = useState(false);
+
+  const albumTracks = selectedAlbum
+    ? tracks.filter(
+        (t) =>
+          String(t.album_id) === String(selectedAlbum.id) ||
+          String(t.album_progetti?.id) === String(selectedAlbum.id),
+      )
+    : [];
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await getSupabase().from("album_progetti").insert({
-      creato_da: user.id,
-      nome_album: form.get("album"),
-    });
-    event.currentTarget.reset();
-    await reload();
+    try {
+      const { error } = await getSupabase().from("album_progetti").insert({
+        creato_da: user.id,
+        nome_album: form.get("album"),
+      });
+      if (error) throw error;
+      event.currentTarget.reset();
+      setShowNewAlbum(false);
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nella creazione dell'album.");
+    }
   }
 
   async function addTrack(event: FormEvent<HTMLFormElement>) {
@@ -593,109 +857,246 @@ function Projects({ albums, tracks, user, reload }: { albums: Album[]; tracks: T
       const form = new FormData(event.currentTarget);
       const fileInput = event.currentTarget.querySelector<HTMLInputElement>('input[type="file"]');
       const file = fileInput?.files?.[0];
-
       const supabase = getSupabase();
       let audio_file_url: string | null = null;
 
       if (file) {
         const filePath = `${Date.now()}-${file.name}`;
         const { error: storageError } = await supabase.storage.from("audio").upload(filePath, file);
-        if (!storageError) {
-          const { data: urlData } = supabase.storage.from("audio").getPublicUrl(filePath);
-          audio_file_url = urlData.publicUrl;
-        }
+        if (storageError) throw storageError;
+        const { data: urlData } = supabase.storage.from("audio").getPublicUrl(filePath);
+        audio_file_url = urlData.publicUrl;
       }
 
-      await supabase.from("tracce_audio").insert({
+      const { error } = await supabase.from("tracce_audio").insert({
         caricato_da: user.id,
-        album_id: form.get("album_id") || null,
+        album_id: selectedAlbum?.id ?? null,
         nome_traccia: form.get("nome_traccia"),
         fase: form.get("fase"),
         audio_file_url,
       });
+      if (error) throw error;
       event.currentTarget.reset();
+      setShowAddTrack(false);
       await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nell'aggiunta della traccia.");
     } finally {
       setUploadingTrack(false);
     }
   }
 
-  return (
-    <>
-      <ModuleHeader title="Studio Hub" text="Album, tracce, fasi di produzione e player per gli asset audio caricati su Supabase Storage." icon={Disc3} />
-      <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
-        <div className="flex flex-col gap-5">
-          <form onSubmit={createAlbum} className="glass rounded-md p-5">
-            <p className="text-lg font-black text-white">Album workspace</p>
-            <Input name="album" label="Nome album" required />
-            <ActionButton icon={Plus} text="Crea album" />
-            <div className="mt-6 space-y-3">
-              {albums.map((album) => (
-                <div key={album.id} className="rounded-md border border-white/10 bg-white/[0.04] p-3">
-                  <p className="font-bold text-white">{album.nome_album}</p>
-                </div>
-              ))}
+  // ── Library view ──────────────────────────────────────────────────────────
+
+  if (studioView === "library") {
+    return (
+      <>
+        <ModuleHeader
+          title="Studio Hub"
+          text="Libreria album, tracce in produzione e upload audio direttamente su Supabase Storage."
+          icon={Disc3}
+          actions={
+            <button
+              onClick={() => setShowNewAlbum(!showNewAlbum)}
+              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-xs font-black text-black transition hover:bg-orange-300"
+            >
+              <Plus size={15} />
+              Nuovo album
+            </button>
+          }
+        />
+
+        {showNewAlbum && (
+          <form onSubmit={createAlbum} className="glass mb-5 flex items-end gap-4 rounded-md p-5">
+            <div className="flex-1">
+              <Input name="album" label="Nome album" required />
+            </div>
+            <div className="flex gap-2">
+              <button type="submit" className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-sm font-black text-black transition hover:bg-orange-300">
+                <Plus size={16} />
+                Crea
+              </button>
+              <button type="button" onClick={() => setShowNewAlbum(false)} className="rounded-md border border-white/15 px-4 py-2.5 text-sm text-white/60 hover:text-white">
+                Annulla
+              </button>
             </div>
           </form>
+        )}
 
-          <form onSubmit={addTrack} className="glass rounded-md p-5">
-            <p className="text-lg font-black text-white">Aggiungi traccia</p>
-            <Input name="nome_traccia" label="Nome traccia" required />
-            <Select name="fase" label="Fase" options={["Demo", "Mix", "Master"]} />
-            <label className="mt-4 block">
-              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">Album</span>
-              <select name="album_id" className="field mt-2 rounded-md px-3 py-2.5 text-sm">
-                <option value="" className="bg-neutral-950">Nessun album</option>
-                {albums.map((album) => (
-                  <option key={album.id} value={album.id} className="bg-neutral-950">{album.nome_album}</option>
-                ))}
-              </select>
-            </label>
-            <label className="mt-4 block">
-              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File audio</span>
-              <input type="file" accept="audio/*" className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
-            </label>
-            <button disabled={uploadingTrack} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
-              {uploadingTrack ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
-              Aggiungi traccia
-            </button>
-          </form>
+        <div className="glass rounded-md p-8">
+          {albums.length === 0 ? (
+            <div className="py-16 text-center">
+              <Disc3 size={48} className="mx-auto mb-4 text-white/15" />
+              <p className="text-lg font-bold text-white/40">Nessun album ancora</p>
+              <p className="mt-2 text-sm text-white/28">Clicca &ldquo;Nuovo album&rdquo; per iniziare a organizzare le tue produzioni.</p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap justify-center gap-10 sm:justify-start sm:gap-12">
+              {albums.map((album) => {
+                const count = tracks.filter(
+                  (t) => String(t.album_id) === String(album.id) || String(t.album_progetti?.id) === String(album.id),
+                ).length;
+                return (
+                  <AlbumCard
+                    key={album.id}
+                    album={album}
+                    trackCount={count}
+                    onClick={() => { setSelectedAlbum(album); setStudioView("project"); }}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  // ── Project detail view ───────────────────────────────────────────────────
+
+  return (
+    <>
+      <div className="mb-6 flex items-center gap-3">
+        <button
+          onClick={() => { setStudioView("library"); setShowAddTrack(false); }}
+          className="inline-flex items-center gap-1.5 rounded-md border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-white/60 hover:text-white"
+        >
+          <ChevronLeft size={16} />
+          Libreria
+        </button>
+      </div>
+
+      <div className="grid gap-8 lg:grid-cols-[280px_1fr] xl:grid-cols-[340px_1fr]">
+        {/* Left: album info */}
+        <div className="lg:sticky lg:top-28 lg:self-start">
+          <div className={`aspect-square w-full max-w-[260px] rounded-2xl bg-gradient-to-br ${albumGradient(selectedAlbum?.nome_album ?? "")} mx-auto lg:mx-0`} />
+          <h2 className="mt-6 text-3xl font-black tracking-tight text-white">{selectedAlbum?.nome_album}</h2>
+          <p className="mt-1 text-sm text-white/50">SUPERFLUIDO</p>
+          <p className="mt-1 font-mono text-xs uppercase tracking-widest text-white/35">{albumTracks.length} tracce</p>
+          <button
+            onClick={() => setShowAddTrack(!showAddTrack)}
+            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-bold text-white/70 transition hover:border-orange-400/30 hover:text-orange-200"
+          >
+            <Plus size={16} />
+            Aggiungi traccia
+          </button>
+
+          {showAddTrack && (
+            <form onSubmit={addTrack} className="glass mt-4 rounded-md p-4">
+              <Input name="nome_traccia" label="Nome traccia" required />
+              <Select name="fase" label="Fase" options={["Demo", "Mix", "Master"]} />
+              <label className="mt-4 block">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File audio</span>
+                <input type="file" accept="audio/*" className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
+              </label>
+              <button
+                type="submit"
+                disabled={uploadingTrack}
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
+              >
+                {uploadingTrack ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                Carica
+              </button>
+            </form>
+          )}
         </div>
 
-        <div className="glass rounded-md p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            {tracks.map((track) => (
-              <article key={track.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200">{track.fase || "Demo"}</p>
-                    <h3 className="mt-2 text-xl font-black text-white">{track.nome_traccia}</h3>
-                    <p className="mt-1 text-sm text-white/45">{track.album_progetti?.nome_album || "Album non assegnato"}</p>
+        {/* Right: tracklist */}
+        <div className="glass rounded-md overflow-hidden">
+          {albumTracks.length === 0 ? (
+            <div className="py-16 text-center">
+              <FileAudio size={36} className="mx-auto mb-4 text-white/15" />
+              <p className="text-sm text-white/35">Nessuna traccia in questo album.</p>
+              <p className="mt-1 text-xs text-white/25">Usa il pulsante &ldquo;Aggiungi traccia&rdquo; per caricare il primo file.</p>
+            </div>
+          ) : (
+            <ul>
+              {albumTracks.map((track, index) => (
+                <li
+                  key={track.id}
+                  className="border-b border-white/8 px-5 py-4 last:border-0 hover:bg-white/[0.025]"
+                >
+                  <div className="flex items-center gap-4">
+                    <span className="w-7 shrink-0 text-right font-mono text-sm text-white/25">{index + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-bold text-white">{track.nome_traccia}</p>
+                      {track.audio_file_url ? (
+                        <audio className="mt-2 h-8 w-full" controls src={track.audio_file_url} />
+                      ) : (
+                        <p className="mt-0.5 text-xs text-white/30">Audio non caricato</p>
+                      )}
+                    </div>
+                    <span className="shrink-0 rounded border border-orange-400/25 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-orange-200">
+                      {track.fase || "Demo"}
+                    </span>
                   </div>
-                  <FileAudio className="text-white/25" />
-                </div>
-                {track.audio_file_url ? <audio className="mt-4 w-full" controls src={track.audio_file_url} /> : <div className="mt-4 h-10 rounded-md border border-dashed border-white/12 text-center text-xs leading-10 text-white/35">Audio non caricato</div>}
-              </article>
-            ))}
-          </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </>
   );
 }
 
+function AlbumCard({ album, trackCount, onClick }: { album: Album; trackCount: number; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="group text-left" style={{ maxWidth: 168 }}>
+      <div className="relative">
+        <div className={`h-36 w-36 rounded-2xl bg-gradient-to-br ${albumGradient(album.nome_album)} transition duration-200 group-hover:brightness-75`} />
+        <div className="absolute -bottom-3 -right-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-orange-500 opacity-0 shadow-lg transition duration-200 group-hover:opacity-100">
+          <Play size={16} fill="black" className="ml-0.5 text-black" />
+        </div>
+      </div>
+      <p className="mt-5 truncate text-sm font-bold text-white">{album.nome_album}</p>
+      <p className="mt-0.5 text-xs text-white/45">{trackCount} {trackCount === 1 ? "traccia" : "tracce"}</p>
+    </button>
+  );
+}
+
+// ─── AI Press Kit ─────────────────────────────────────────────────────────────
+
+const MEMBERS = ["Eric Draven", "Martire", "gg.Proiettili", "NONe", "Slam aka Hysteriack", "Leony47", "Giord"];
+
+const OUTPUT_TYPES = ["Press Kit completo", "Tech Rider", "Bio breve", "Caption social"] as const;
+type OutputType = (typeof OUTPUT_TYPES)[number];
+
+const DEFAULT_PROMPTS: Record<OutputType, string> = {
+  "Press Kit completo": "Genera un press kit completo per il collettivo, includendo bio artistica, pitch editoriale, punti di forza e contatti booking.",
+  "Tech Rider": "Genera un tech rider completo per il live, con stage plot testuale, lista equipment PA e monitor, hospitality e note tecniche per il service audio.",
+  "Bio breve": "Scrivi una bio breve (max 150 parole) per uso booking e social, focalizzata sui membri presenti all'evento.",
+  "Caption social": "Scrivi una caption per Instagram (max 280 caratteri) per promuovere l'evento o la release, con hashtag rilevanti e call to action.",
+};
+
 function PressKit({ state }: { state: AppState }) {
-  const [prompt, setPrompt] = useState("Genera un press kit sintetico per la prossima release, includendo bio, pitch editoriale, punti forza e caption social.");
+  const [outputType, setOutputType] = useState<OutputType>("Press Kit completo");
+  const [prompt, setPrompt] = useState(DEFAULT_PROMPTS["Press Kit completo"]);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([...MEMBERS]);
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
+
+  function toggleMember(name: string) {
+    setSelectedMembers((prev) =>
+      prev.includes(name) ? prev.filter((m) => m !== name) : [...prev, name],
+    );
+  }
+
+  function handleOutputTypeChange(type: OutputType) {
+    setOutputType(type);
+    setPrompt(DEFAULT_PROMPTS[type]);
+  }
+
   const context = useMemo(
     () => ({
+      tipoOutput: outputType,
+      membriPresenti: selectedMembers,
       profiles: state.profiles,
       tracks: state.tracks.slice(0, 8),
       events: state.events.slice(0, 6),
       inventory: state.products.slice(0, 6),
     }),
-    [state],
+    [state, outputType, selectedMembers],
   );
 
   async function generate() {
@@ -708,9 +1109,7 @@ function PressKit({ state }: { state: AppState }) {
         body: JSON.stringify({ prompt, context }),
       });
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Errore AI.");
-      }
+      if (!response.ok) throw new Error(data.error || "Errore AI.");
       setAnswer(data.text);
     } catch (error) {
       setAnswer(error instanceof Error ? error.message : "Errore durante la generazione.");
@@ -721,17 +1120,59 @@ function PressKit({ state }: { state: AppState }) {
 
   return (
     <>
-      <ModuleHeader title="AI Press Kit" text="Generazione reale via Groq, compatibile con il formato OpenAI Chat Completions e isolata lato server." icon={Bot} />
-      <div className="grid gap-5 lg:grid-cols-[430px_1fr]">
-        <div className="glass rounded-md p-5">
-          <Textarea label="Prompt operativo" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={9} />
-          <button onClick={generate} disabled={loading} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
-            {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-            Genera con Groq
-          </button>
-          <div className="mt-5 rounded-md border border-white/10 bg-black/30 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">Contesto inviato</p>
-            <p className="mt-2 text-sm text-white/58">{state.profiles.length} profili, {state.tracks.length} tracce, {state.events.length} eventi.</p>
+      <ModuleHeader title="AI Press Kit" text="Generazione documenti via Groq con bio reale del collettivo e selezione membri per evento." icon={Bot} />
+      <div className="grid gap-5 lg:grid-cols-[400px_1fr]">
+        <div className="space-y-4">
+          {/* Output type */}
+          <div className="glass rounded-md p-5">
+            <p className="mb-3 text-sm font-black text-white">Tipo documento</p>
+            <div className="grid grid-cols-2 gap-2">
+              {OUTPUT_TYPES.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => handleOutputTypeChange(type)}
+                  className={`rounded-md border px-3 py-2 text-xs font-bold text-left transition ${
+                    outputType === type
+                      ? "border-orange-400/60 bg-orange-500/15 text-orange-200"
+                      : "border-white/10 bg-white/[0.03] text-white/55 hover:text-white"
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Members selector */}
+          <div className="glass rounded-md p-5">
+            <p className="mb-3 text-sm font-black text-white">Membri presenti</p>
+            <div className="space-y-2">
+              {MEMBERS.map((member) => (
+                <label key={member} className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedMembers.includes(member)}
+                    onChange={() => toggleMember(member)}
+                    className="h-4 w-4 accent-orange-500"
+                  />
+                  <span className="text-sm text-white/75">{member}</span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-white/35">{selectedMembers.length} di {MEMBERS.length} selezionati</p>
+          </div>
+
+          {/* Prompt */}
+          <div className="glass rounded-md p-5">
+            <Textarea label="Prompt operativo" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={6} />
+            <button
+              onClick={generate}
+              disabled={loading}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
+            >
+              {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+              Genera con Groq
+            </button>
           </div>
         </div>
 
@@ -740,27 +1181,48 @@ function PressKit({ state }: { state: AppState }) {
             <p className="font-black text-white">Output AI</p>
             <Sparkles size={18} className="text-orange-300" />
           </div>
-          <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-white/75">{answer || "L'output generato apparira qui."}</pre>
+          {answer ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-white/75">{answer}</pre>
+          ) : (
+            <p className="text-sm text-white/25">{loading ? "Generazione in corso…" : "L'output apparirà qui."}</p>
+          )}
         </div>
       </div>
     </>
   );
 }
 
-function Profiles({ profiles, user, reload }: { profiles: ArtistProfile[]; user: AppUser; reload: () => Promise<void> }) {
+// ─── Profiles ─────────────────────────────────────────────────────────────────
+
+function Profiles({
+  profiles,
+  user,
+  reload,
+  onError,
+}: {
+  profiles: ArtistProfile[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await getSupabase().from("profili_artisti").upsert({
-      user_id: user.id,
-      nome_arte: form.get("nome_arte"),
-      strumentazione: form.get("strumentazione"),
-      bio_breve: form.get("bio_breve"),
-      email_contatto: form.get("email_contatto"),
-      link_instagram: form.get("link_instagram"),
-      link_spotify: form.get("link_spotify"),
-    });
-    await reload();
+    try {
+      const { error } = await getSupabase().from("profili_artisti").upsert({
+        user_id: user.id,
+        nome_arte: form.get("nome_arte"),
+        strumentazione: form.get("strumentazione"),
+        bio_breve: form.get("bio_breve"),
+        email_contatto: form.get("email_contatto"),
+        link_instagram: form.get("link_instagram"),
+        link_spotify: form.get("link_spotify"),
+      });
+      if (error) throw error;
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nel salvataggio del profilo.");
+    }
   }
 
   return (
@@ -777,25 +1239,48 @@ function Profiles({ profiles, user, reload }: { profiles: ArtistProfile[]; user:
           <ActionButton icon={Download} text="Salva profilo" />
         </form>
         <div className="grid gap-4 md:grid-cols-2">
-          {profiles.map((profile) => (
-            <article key={profile.user_id} className="glass rounded-md p-5">
-              <p className="text-2xl font-black text-white">{profile.nome_arte || "Profilo senza nome"}</p>
-              <p className="mt-2 text-sm text-orange-200">{profile.strumentazione || "Setup non indicato"}</p>
-              <p className="mt-4 text-sm leading-6 text-white/60">{profile.bio_breve || "Bio non ancora compilata."}</p>
-            </article>
-          ))}
+          {profiles.length === 0 ? (
+            <div className="col-span-2 py-12 text-center text-sm text-white/35">
+              Nessun profilo. Compila il form per aggiungere la tua scheda artista.
+            </div>
+          ) : (
+            profiles.map((profile) => (
+              <article key={profile.user_id} className="glass rounded-md p-5">
+                <p className="text-2xl font-black text-white">{profile.nome_arte || "Profilo senza nome"}</p>
+                <p className="mt-2 text-sm text-orange-200">{profile.strumentazione || "Setup non indicato"}</p>
+                <p className="mt-4 text-sm leading-6 text-white/60">{profile.bio_breve || "Bio non ancora compilata."}</p>
+              </article>
+            ))
+          )}
         </div>
       </div>
     </>
   );
 }
 
-function Vault({ files, user, reload }: { files: VaultFile[]; user: AppUser; reload: () => Promise<void> }) {
+// ─── Vault ────────────────────────────────────────────────────────────────────
+
+function Vault({
+  files,
+  user,
+  reload,
+  onError,
+}: {
+  files: VaultFile[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
   const [uploading, setUploading] = useState(false);
 
   async function deleteFile(file: VaultFile) {
-    await getSupabase().from("vault_documenti").delete().eq("id", file.id);
-    await reload();
+    try {
+      const { error } = await getSupabase().from("vault_documenti").delete().eq("id", file.id);
+      if (error) throw error;
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nell'eliminazione del file.");
+    }
   }
 
   async function uploadFile(event: FormEvent<HTMLFormElement>) {
@@ -813,13 +1298,16 @@ function Vault({ files, user, reload }: { files: VaultFile[]; user: AppUser; rel
       if (storageError) throw storageError;
 
       const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
-      await supabase.from("vault_documenti").insert({
+      const { error } = await supabase.from("vault_documenti").insert({
         nome_file: (form.get("nome_file") as string) || file.name,
         cartella: form.get("cartella"),
         file_url: urlData.publicUrl,
       });
+      if (error) throw error;
       event.currentTarget.reset();
       await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nel caricamento del file.");
     } finally {
       setUploading(false);
     }
@@ -830,37 +1318,52 @@ function Vault({ files, user, reload }: { files: VaultFile[]; user: AppUser; rel
       <ModuleHeader title="Vault" text="Documenti, contratti e asset organizzati per cartelle." icon={Archive} />
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
         <div className="glass rounded-md p-5">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {files.map((file) => (
-              <article key={file.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200">{file.cartella}</p>
-                <h3 className="mt-2 font-black text-white">{file.nome_file}</h3>
-                <div className="mt-5 flex gap-2">
-                  <a href={file.file_url} className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-white/8 px-3 py-2 text-xs font-bold text-white hover:bg-white/12">
-                    <Download size={15} />
-                    Apri
-                  </a>
-                  {user.role === "master" ? (
-                    <button onClick={() => deleteFile(file)} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10">
-                      <Trash2 size={15} />
-                    </button>
-                  ) : null}
-                </div>
-              </article>
-            ))}
-          </div>
+          {files.length === 0 ? (
+            <p className="py-12 text-center text-sm text-white/35">Nessun documento. Carica il primo con il form a destra.</p>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {files.map((file) => (
+                <article key={file.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200">{file.cartella}</p>
+                  <h3 className="mt-2 font-black text-white">{file.nome_file}</h3>
+                  <div className="mt-5 flex gap-2">
+                    <a
+                      href={file.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-white/8 px-3 py-2 text-xs font-bold text-white hover:bg-white/12"
+                    >
+                      <Download size={15} />
+                      Apri
+                    </a>
+                    {user.role === "master" ? (
+                      <button
+                        onClick={() => deleteFile(file)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
 
         <form onSubmit={uploadFile} className="glass rounded-md p-5">
           <p className="text-lg font-black text-white">Carica documento</p>
-          <p className="mt-1 text-sm text-white/50">Upload su Supabase Storage bucket "vault".</p>
+          <p className="mt-1 text-sm text-white/50">Upload su Supabase Storage bucket &ldquo;vault&rdquo;.</p>
           <Input name="nome_file" label="Nome file (opzionale)" />
           <Select name="cartella" label="Cartella" options={["Press", "Live", "Amministrazione", "Altro"]} />
           <label className="mt-4 block">
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File</span>
             <input type="file" required className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
           </label>
-          <button disabled={uploading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
+          <button
+            disabled={uploading}
+            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
+          >
             {uploading ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
             Carica
           </button>
@@ -869,6 +1372,8 @@ function Vault({ files, user, reload }: { files: VaultFile[]; user: AppUser; rel
     </>
   );
 }
+
+// ─── Form helpers ─────────────────────────────────────────────────────────────
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
   const { label, className, ...inputProps } = props;
@@ -914,10 +1419,10 @@ function ActionButton({ icon: Icon, text }: { icon: typeof Plus; text: string })
   );
 }
 
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
 function formatEuro(value: number | null) {
-  if (value == null) {
-    return "-";
-  }
+  if (value == null) return "-";
   return new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(Number(value));
 }
 
