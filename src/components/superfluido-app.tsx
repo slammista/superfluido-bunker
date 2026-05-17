@@ -5,6 +5,7 @@ import {
   Archive,
   Bot,
   CalendarDays,
+  CheckCircle,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -13,12 +14,9 @@ import {
   FileAudio,
   FolderOpen,
   Home,
-  LayoutGrid,
-  List,
   Loader2,
   LogOut,
   Package,
-  Play,
   Plus,
   Search,
   Send,
@@ -27,10 +25,12 @@ import {
   UploadCloud,
   UserRound,
   Warehouse,
+  X,
 } from "lucide-react";
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
 
 type View = "home" | "inventory" | "calendar" | "projects" | "press" | "profile" | "vault" | "kanban";
@@ -52,6 +52,9 @@ type AppState = {
   tasks: KanbanTask[];
 };
 
+// Notifica con tipo: error | success
+type Toast = { text: string; kind: "error" | "success" };
+
 const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "home", label: "Overview", icon: Home },
   { id: "inventory", label: "Magazzino", icon: Package },
@@ -63,13 +66,19 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "kanban", label: "Task Board", icon: ClipboardList },
 ];
 
+// Categorie prodotto allineate al CHECK constraint del DB
+const PRODUCT_CATEGORIES = ["Vestiario", "Supporto Fisico", "Merch", "Vinile", "Print", "Accessori", "Tele", "Altro"] as const;
+
+// Fasi traccia allineate al CHECK constraint del DB
+const TRACK_PHASES = ["Beat", "Provini", "Demo", "Mix", "Master"] as const;
+
 const emptyState: AppState = {
-  products: [],
-  events: [],
-  albums: [],
-  tracks: [],
-  profiles: [],
-  vault: [],
+  products: sampleProducts,
+  events: sampleEvents,
+  albums: sampleAlbums,
+  tracks: sampleTracks,
+  profiles: sampleProfiles,
+  vault: sampleVault,
   folders: [],
   tasks: [],
 };
@@ -80,6 +89,12 @@ export function SuperfluidoApp() {
   const [state, setState] = useState<AppState>(emptyState);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
+
+  function showToast(text: string, kind: "error" | "success" = "error") {
+    setToast({ text, kind });
+    setTimeout(() => setToast(null), 4000);
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -88,7 +103,9 @@ export function SuperfluidoApp() {
       try {
         const supabase = getSupabase();
         const { data } = await supabase.auth.getSession();
+
         if (!mounted) return;
+
         if (data.session?.user) {
           const role = await fetchRole(data.session.user.id);
           const appUser = {
@@ -100,7 +117,7 @@ export function SuperfluidoApp() {
           await loadWorkspace(appUser.id);
         }
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "Supabase non configurato.");
+        setNotice(error instanceof Error ? error.message : "Supabase non configurato. Uso dati demo.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -118,23 +135,25 @@ export function SuperfluidoApp() {
 
   async function loadWorkspace(userId: string) {
     const supabase = getSupabase();
+
     const [products, events, albums, tracks, profiles, vault, folders, tasks] = await Promise.all([
       supabase.from("products").select("*, product_variants(*)"),
       supabase.from("eventi_calendario").select("*").order("data_evento"),
-      supabase.from("album_progetti").select("*").eq("creato_da", userId),
+      supabase.from("album_progetti").select("*").order("created_at", { ascending: false }),
       supabase.from("tracce_audio").select("*, album_progetti(id, nome_album)").eq("caricato_da", userId),
       supabase.from("profili_artisti").select("*"),
       supabase.from("vault_documenti").select("*").order("created_at", { ascending: false }),
       supabase.from("vault_cartelle").select("*").order("created_at"),
       supabase.from("tasks_kanban").select("*").order("created_at"),
     ]);
+
     setState({
-      products: (products.data ?? []) as Product[],
-      events: (events.data ?? []) as CalendarEvent[],
-      albums: (albums.data ?? []) as Album[],
-      tracks: (tracks.data ?? []) as Track[],
-      profiles: (profiles.data ?? []) as ArtistProfile[],
-      vault: (vault.data ?? []) as VaultFile[],
+      products: products.data?.length ? (products.data as Product[]) : sampleProducts,
+      events: events.data?.length ? (events.data as CalendarEvent[]) : sampleEvents,
+      albums: albums.data?.length ? (albums.data as Album[]) : sampleAlbums,
+      tracks: tracks.data?.length ? (tracks.data as Track[]) : sampleTracks,
+      profiles: profiles.data?.length ? (profiles.data as ArtistProfile[]) : sampleProfiles,
+      vault: vault.data?.length ? (vault.data as VaultFile[]) : sampleVault,
       folders: (folders.data ?? []) as VaultFolder[],
       tasks: (tasks.data ?? []) as KanbanTask[],
     });
@@ -172,8 +191,6 @@ export function SuperfluidoApp() {
   if (!user) {
     return <LoginScreen loading={loading} notice={notice} onLogin={handleLogin} />;
   }
-
-  const reload = () => loadWorkspace(user.id);
 
   return (
     <main className="min-h-screen">
@@ -221,6 +238,23 @@ export function SuperfluidoApp() {
         </nav>
       </header>
 
+      {/* Toast globale */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-semibold shadow-xl transition ${
+            toast.kind === "success"
+              ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-100"
+              : "border-red-400/30 bg-red-500/15 text-red-100"
+          }`}
+        >
+          {toast.kind === "success" ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+          {toast.text}
+          <button onClick={() => setToast(null)} className="ml-2 opacity-60 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <section className="mx-auto max-w-7xl px-4 py-6 lg:py-8">
         {notice ? <Notice text={notice} /> : null}
 
@@ -228,32 +262,30 @@ export function SuperfluidoApp() {
           <Overview state={state} user={user} goTo={setView} />
         </div>
         <div className={view === "inventory" ? "" : "hidden"}>
-          <Inventory products={state.products} user={user} reload={reload} onError={setNotice} />
+          <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "calendar" ? "" : "hidden"}>
-          <CalendarModule events={state.events} user={user} reload={reload} onError={setNotice} />
+          <CalendarModule events={state.events} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "projects" ? "" : "hidden"}>
-          <Projects albums={state.albums} tracks={state.tracks} user={user} reload={reload} onError={setNotice} />
+          <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "press" ? "" : "hidden"}>
           <PressKit state={state} />
         </div>
         <div className={view === "profile" ? "" : "hidden"}>
-          <Profiles profiles={state.profiles} user={user} reload={reload} onError={setNotice} />
+          <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "vault" ? "" : "hidden"}>
-          <Vault files={state.vault} folders={state.folders} user={user} reload={reload} onError={setNotice} />
+          <Vault files={state.vault} folders={state.folders} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "kanban" ? "" : "hidden"}>
-          <KanbanBoard tasks={state.tasks} user={user} reload={reload} onError={setNotice} />
+          <KanbanBoard tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
       </section>
     </main>
   );
 }
-
-// ─── Login ────────────────────────────────────────────────────────────────────
 
 function LoginScreen({
   loading,
@@ -283,11 +315,15 @@ function LoginScreen({
         </div>
         <h1 className="text-center text-2xl font-black tracking-tight text-white">Bunker Login</h1>
         <p className="mt-2 text-center text-sm text-white/55">Accesso operativo a magazzino, studio, calendario e AI press kit.</p>
+
         {notice ? <Notice text={notice} /> : null}
+
         <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="utente@superfluido.it" />
+        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" />
+
         <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Password" />
+        <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" />
+
         <button
           disabled={loading}
           className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
@@ -299,8 +335,6 @@ function LoginScreen({
     </main>
   );
 }
-
-// ─── Shared UI ────────────────────────────────────────────────────────────────
 
 function NavButton({
   item,
@@ -336,27 +370,7 @@ function Notice({ text }: { text: string }) {
   );
 }
 
-function FormError({ text }: { text: string | null }) {
-  if (!text) return null;
-  return (
-    <div className="mt-3 flex items-start gap-2 rounded-md border border-red-400/30 bg-red-500/10 p-3 text-xs text-red-200">
-      <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-      <p>{text}</p>
-    </div>
-  );
-}
-
-function ModuleHeader({
-  title,
-  text,
-  icon: Icon,
-  actions,
-}: {
-  title: string;
-  text: string;
-  icon: typeof Home;
-  actions?: React.ReactNode;
-}) {
+function ModuleHeader({ title, text, icon: Icon }: { title: string; text: string; icon: typeof Home }) {
   return (
     <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
       <div>
@@ -366,19 +380,16 @@ function ModuleHeader({
         <h2 className="text-3xl font-black tracking-tight text-white md:text-5xl">{title}</h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-white/56">{text}</p>
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
 
-// ─── Overview ─────────────────────────────────────────────────────────────────
-
 function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo: (view: View) => void }) {
   const totalStock = state.products.reduce(
-    (sum, p) => sum + (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0),
+    (sum, product) => sum + (product.product_variants ?? []).reduce((variantSum, variant) => variantSum + Number(variant.stock_quantity ?? 0), 0),
     0,
   );
-  const lowStock = state.products.filter((p) => (p.product_variants ?? []).some((v) => Number(v.stock_quantity) < 6));
+  const lowStock = state.products.filter((product) => (product.product_variants ?? []).some((variant) => Number(variant.stock_quantity) < 6));
 
   return (
     <>
@@ -448,49 +459,52 @@ function Metric({ title, value, tone }: { title: string; value: string; tone: "o
   );
 }
 
-// ─── Inventory ────────────────────────────────────────────────────────────────
-
-function Inventory({
-  products,
-  user,
-  reload,
-  onError,
-}: {
-  products: Product[];
-  user: AppUser;
-  reload: () => Promise<void>;
-  onError: (msg: string) => void;
-}) {
+function Inventory({ products, user, reload, onToast }: { products: Product[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [query, setQuery] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  const filtered = products.filter((p) => `${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
+  const [saving, setSaving] = useState(false);
+  const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
 
-  async function addDemoProduct(event: FormEvent<HTMLFormElement>) {
+  async function addProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setFormError(null);
-    const data = new FormData(event.currentTarget);
+    setSaving(true);
     try {
+      const data = new FormData(event.currentTarget);
+      const name = String(data.get("name") ?? "").trim();
+      const category = String(data.get("category") ?? "Altro");
+      const stock = Number(data.get("stock") ?? 0);
+
+      if (!name) {
+        onToast("Inserisci un nome per il prodotto.");
+        return;
+      }
+
       const supabase = getSupabase();
-      const created = await supabase
+      const { data: created, error } = await supabase
         .from("products")
-        .insert({
-          name: String(data.get("name") ?? ""),
-          category: String(data.get("category") ?? "Merch"),
-          base_price_sell: Number(data.get("price") ?? 0),
-          base_price_cost: 0,
-        })
+        .insert({ name, category, base_price_sell: Number(data.get("price") ?? 0), base_price_cost: 0 })
         .select()
         .single();
-      if (created.error) throw created.error;
-      await supabase.from("product_variants").insert({
-        product_id: created.data.id,
+
+      if (error) {
+        onToast(`Errore prodotto: ${error.message}`);
+        return;
+      }
+
+      const { error: variantError } = await supabase.from("product_variants").insert({
+        product_id: created.id,
         variant_name: "Default",
-        stock_quantity: Number(data.get("stock") ?? 0),
+        stock_quantity: stock,
       });
-      event.currentTarget.reset();
+
+      if (variantError) {
+        onToast(`Prodotto creato ma errore variante: ${variantError.message}`);
+      } else {
+        onToast("Prodotto aggiunto.", "success");
+        (event.target as HTMLFormElement).reset();
+      }
       await reload();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Errore nella creazione del prodotto.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -501,50 +515,45 @@ function Inventory({
         <div className="glass rounded-md p-5">
           <div className="mb-5 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
             <Search size={18} className="text-white/40" />
-            <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
-          {filtered.length === 0 ? (
-            <p className="py-12 text-center text-sm text-white/35">Nessun prodotto in magazzino. Aggiungine uno con il form a destra.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse text-left text-sm">
-                <thead className="text-xs uppercase tracking-[0.16em] text-white/38">
-                  <tr>
-                    <th className="border-b border-white/10 py-3">Prodotto</th>
-                    <th className="border-b border-white/10 py-3">Categoria</th>
-                    <th className="border-b border-white/10 py-3">Varianti</th>
-                    <th className="border-b border-white/10 py-3 text-right">Prezzo</th>
-                    <th className="border-b border-white/10 py-3 text-right">Stock</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((product) => {
-                    const stock = (product.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
-                    return (
-                      <tr key={product.id} className="border-b border-white/7 text-white/78">
-                        <td className="py-4 font-bold text-white">{product.name}</td>
-                        <td className="py-4">{product.category ?? "Generale"}</td>
-                        <td className="py-4">{(product.product_variants ?? []).map((v) => `${v.variant_name}: ${v.stock_quantity}`).join(" · ")}</td>
-                        <td className="py-4 text-right font-mono">{formatEuro(product.base_price_sell)}</td>
-                        <td className={`py-4 text-right font-mono font-black ${stock < 6 ? "text-red-300" : "text-emerald-300"}`}>{stock}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+              <thead className="text-xs uppercase tracking-[0.16em] text-white/38">
+                <tr>
+                  <th className="border-b border-white/10 py-3">Prodotto</th>
+                  <th className="border-b border-white/10 py-3">Categoria</th>
+                  <th className="border-b border-white/10 py-3">Varianti</th>
+                  <th className="border-b border-white/10 py-3 text-right">Prezzo</th>
+                  <th className="border-b border-white/10 py-3 text-right">Stock</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((product) => {
+                  const stock = (product.product_variants ?? []).reduce((sum, item) => sum + Number(item.stock_quantity ?? 0), 0);
+                  return (
+                    <tr key={product.id} className="border-b border-white/7 text-white/78">
+                      <td className="py-4 font-bold text-white">{product.name}</td>
+                      <td className="py-4">{product.category ?? "Generale"}</td>
+                      <td className="py-4">{(product.product_variants ?? []).map((variant) => `${variant.variant_name}: ${variant.stock_quantity}`).join(" · ")}</td>
+                      <td className="py-4 text-right font-mono">{formatEuro(product.base_price_sell)}</td>
+                      <td className={`py-4 text-right font-mono font-black ${stock < 6 ? "text-red-300" : "text-emerald-300"}`}>{stock}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <form onSubmit={addDemoProduct} className="glass rounded-md p-5">
+        <form onSubmit={addProduct} className="glass rounded-md p-5">
           <p className="text-lg font-black text-white">Nuovo prodotto</p>
           <p className="mt-1 text-sm text-white/50">Creazione rapida su Supabase per merch e supporti fisici.</p>
           <Input name="name" label="Nome" required />
-          <Input name="category" label="Categoria" defaultValue="Merch" />
+          <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
           <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
           <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
-          <FormError text={formError} />
-          <ActionButton icon={Plus} text="Aggiungi" />
+          <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
           <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
         </form>
       </div>
@@ -552,170 +561,87 @@ function Inventory({
   );
 }
 
-// ─── Calendar ─────────────────────────────────────────────────────────────────
-
-type CalView = "grid" | "list" | "month";
-
-function CalendarModule({
-  events,
-  user,
-  reload,
-  onError,
-}: {
-  events: CalendarEvent[];
-  user: AppUser;
-  reload: () => Promise<void>;
-  onError: (msg: string) => void;
-}) {
-  const [calView, setCalView] = useState<CalView>("grid");
-  const [calMonth, setCalMonth] = useState(new Date().getMonth());
-  const [calYear, setCalYear] = useState(new Date().getFullYear());
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const MONTH_NAMES = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+function CalendarModule({ events, user, reload, onToast }: { events: CalendarEvent[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
+  const [saving, setSaving] = useState(false);
 
   async function createEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setFormError(null);
-    const form = new FormData(event.currentTarget);
+    setSaving(true);
     try {
+      const form = new FormData(event.currentTarget);
+      const title = String(form.get("title") ?? "").trim();
+      const date = form.get("date");
+      const time = form.get("time") || "20:00";
+
+      if (!title || !date) {
+        onToast("Titolo e data sono obbligatori.");
+        return;
+      }
+
+      const data_evento = `${date}T${time}:00+02:00`;
+
       const { error } = await getSupabase().from("eventi_calendario").insert({
         creato_da: user.id,
-        titolo: form.get("title"),
+        titolo: title,
         tipo_evento: form.get("type"),
-        data_evento: `${form.get("date")}T${form.get("time") || "20:00"}:00+02:00`,
-        luogo: form.get("place"),
-        note: form.get("note"),
+        data_evento,
+        luogo: form.get("place") || null,
+        note: form.get("note") || null,
         membri_coinvolti: [],
         colore: form.get("color") || "#ff6b35",
       });
-      if (error) throw error;
-      event.currentTarget.reset();
+
+      if (error) {
+        onToast(`Errore evento: ${error.message}`);
+        return;
+      }
+
+      onToast("Evento registrato.", "success");
+      (event.target as HTMLFormElement).reset();
       await reload();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Errore nella creazione dell'evento.");
+    } finally {
+      setSaving(false);
     }
   }
 
   async function deleteEvent(id: string | number) {
-    try {
-      const { error } = await getSupabase().from("eventi_calendario").delete().eq("id", id);
-      if (error) throw error;
-      await reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nell'eliminazione dell'evento.");
+    const { error } = await getSupabase().from("eventi_calendario").delete().eq("id", id);
+    if (error) {
+      onToast(`Errore eliminazione: ${error.message}`);
+      return;
     }
+    onToast("Evento eliminato.", "success");
+    await reload();
   }
-
-  const sorted = [...events].sort((a, b) => new Date(a.data_evento).getTime() - new Date(b.data_evento).getTime());
-
-  const viewToggle = (
-    <div className="flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] p-1">
-      {([
-        { id: "grid" as CalView, icon: LayoutGrid, label: "Griglia" },
-        { id: "list" as CalView, icon: List, label: "Lista" },
-        { id: "month" as CalView, icon: CalendarDays, label: "Mese" },
-      ] as const).map(({ id, icon: Icon, label }) => (
-        <button
-          key={id}
-          onClick={() => setCalView(id)}
-          title={label}
-          className={`inline-flex h-8 w-8 items-center justify-center rounded transition ${
-            calView === id ? "bg-orange-500 text-black" : "text-white/50 hover:text-white"
-          }`}
-        >
-          <Icon size={15} />
-        </button>
-      ))}
-    </div>
-  );
 
   return (
     <>
-      <ModuleHeader
-        title="Calendario"
-        text="Vista eventi condivisa per live, release, interviste e sessioni studio."
-        icon={CalendarDays}
-        actions={viewToggle}
-      />
-
+      <ModuleHeader title="Calendario" text="Vista eventi condivisa per live, release, interviste e sessioni studio." icon={CalendarDays} />
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <div className="glass rounded-md p-5">
-          {/* Month navigation (only in month view) */}
-          {calView === "month" && (
-            <div className="mb-4 flex items-center justify-between">
-              <button
-                onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(calYear - 1); } else setCalMonth(calMonth - 1); }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-white/60 hover:text-white"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <p className="font-bold text-white">{MONTH_NAMES[calMonth]} {calYear}</p>
-              <button
-                onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(calYear + 1); } else setCalMonth(calMonth + 1); }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-white/60 hover:text-white"
-              >
-                <ChevronRight size={16} />
-              </button>
+          {events.length === 0 ? (
+            <p className="py-10 text-center text-sm text-white/40">Nessun evento in calendario.</p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {events.map((event) => (
+                <article key={event.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+                  <div className="mb-4 h-1 rounded-full" style={{ background: event.colore ?? "#ff6b35" }} />
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">{event.tipo_evento}</p>
+                  <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
+                  <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
+                  <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={() => deleteEvent(event.id)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
+                      title="Elimina evento"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </article>
+              ))}
             </div>
-          )}
-
-          {/* Grid view */}
-          {calView === "grid" && (
-            events.length === 0 ? (
-              <p className="py-12 text-center text-sm text-white/35">Nessun evento. Aggiungi il primo con il form a destra.</p>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-2">
-                {sorted.map((event) => (
-                  <EventCard key={event.id} event={event} onDelete={() => deleteEvent(event.id)} />
-                ))}
-              </div>
-            )
-          )}
-
-          {/* List view */}
-          {calView === "list" && (
-            events.length === 0 ? (
-              <p className="py-12 text-center text-sm text-white/35">Nessun evento.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[600px] border-collapse text-left text-sm">
-                  <thead className="text-xs uppercase tracking-[0.14em] text-white/38">
-                    <tr>
-                      <th className="border-b border-white/10 pb-3">Data</th>
-                      <th className="border-b border-white/10 pb-3">Tipo</th>
-                      <th className="border-b border-white/10 pb-3">Titolo</th>
-                      <th className="border-b border-white/10 pb-3">Luogo</th>
-                      <th className="border-b border-white/10 pb-3" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sorted.map((event) => (
-                      <tr key={event.id} className="border-b border-white/7 text-white/75">
-                        <td className="py-3 font-mono text-xs text-orange-200">{formatDate(event.data_evento)}</td>
-                        <td className="py-3">{event.tipo_evento}</td>
-                        <td className="py-3 font-bold text-white">{event.titolo}</td>
-                        <td className="py-3">{event.luogo || "—"}</td>
-                        <td className="py-3 text-right">
-                          <button
-                            onClick={() => deleteEvent(event.id)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-400/25 text-red-300 hover:bg-red-500/10"
-                            title="Elimina"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          )}
-
-          {/* Month view */}
-          {calView === "month" && (
-            <MonthView events={events} month={calMonth} year={calYear} />
           )}
         </div>
 
@@ -728,166 +654,44 @@ function CalendarModule({
           <Input name="place" label="Luogo" />
           <Input name="color" label="Colore" type="color" defaultValue="#ff6b35" />
           <Textarea name="note" label="Note" />
-          <FormError text={formError} />
-          <ActionButton icon={Plus} text="Registra data" />
+          <ActionButton icon={Plus} text="Registra data" loading={saving} />
         </form>
       </div>
     </>
   );
 }
 
-function EventCard({ event, onDelete }: { event: CalendarEvent; onDelete: () => void }) {
-  return (
-    <article className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-      <div className="mb-4 h-1 rounded-full" style={{ background: event.colore ?? "#ff6b35" }} />
-      <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">{event.tipo_evento}</p>
-      <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
-      <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
-      <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
-      <div className="mt-4 flex justify-end">
-        <button
-          onClick={onDelete}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
-          title="Elimina evento"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function MonthView({ events, month, year }: { events: CalendarEvent[]; month: number; year: number }) {
-  const DAYS = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDayOfWeek = new Date(year, month, 1).getDay();
-  const startOffset = (firstDayOfWeek + 6) % 7;
-
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < startOffset; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const today = new Date();
-  const isToday = (d: number) => today.getDate() === d && today.getMonth() === month && today.getFullYear() === year;
-
-  const eventsOnDay = (d: number) =>
-    events.filter((e) => {
-      const date = new Date(e.data_evento);
-      return date.getMonth() === month && date.getFullYear() === year && date.getDate() === d;
-    });
-
-  return (
-    <div>
-      <div className="mb-1 grid grid-cols-7">
-        {DAYS.map((d) => (
-          <div key={d} className="py-2 text-center text-xs font-bold uppercase tracking-wider text-white/35">{d}</div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((day, i) => (
-          <div
-            key={i}
-            className={`min-h-[72px] rounded-md p-1.5 text-xs ${
-              day ? "bg-white/[0.03] hover:bg-white/[0.06]" : ""
-            } ${day && isToday(day) ? "ring-1 ring-orange-500/60" : ""}`}
-          >
-            {day && (
-              <>
-                <span className={`block text-right font-mono text-[11px] ${isToday(day) ? "font-bold text-orange-300" : "text-white/35"}`}>
-                  {day}
-                </span>
-                <div className="mt-0.5 space-y-0.5">
-                  {eventsOnDay(day).map((e) => (
-                    <div
-                      key={e.id}
-                      className="truncate rounded px-1 py-0.5 text-[9px] font-bold text-black"
-                      style={{ background: e.colore ?? "#ff6b35" }}
-                      title={e.titolo}
-                    >
-                      {e.titolo}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Studio Hub ───────────────────────────────────────────────────────────────
-
-type StudioView = "library" | "project";
-
-const ALBUM_GRADIENTS = [
-  "from-orange-600 to-red-900",
-  "from-violet-600 to-purple-900",
-  "from-sky-600 to-blue-900",
-  "from-emerald-600 to-teal-900",
-  "from-pink-600 to-rose-900",
-  "from-amber-600 to-orange-900",
-];
-
-function albumGradient(name: string) {
-  return ALBUM_GRADIENTS[(name.charCodeAt(0) ?? 0) % ALBUM_GRADIENTS.length];
-}
-
-function Projects({
-  albums,
-  tracks,
-  user,
-  reload,
-  onError,
-}: {
-  albums: Album[];
-  tracks: Track[];
-  user: AppUser;
-  reload: () => Promise<void>;
-  onError: (msg: string) => void;
-}) {
-  const [studioView, setStudioView] = useState<StudioView>("library");
-  const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
-  const [showNewAlbum, setShowNewAlbum] = useState(false);
-  const [showAddTrack, setShowAddTrack] = useState(false);
+function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; tracks: Track[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [uploadingTrack, setUploadingTrack] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const albumTracks = selectedAlbum
-    ? tracks.filter(
-        (t) =>
-          String(t.album_id) === String(selectedAlbum.id) ||
-          String(t.album_progetti?.id) === String(selectedAlbum.id),
-      )
-    : [];
+  const [savingAlbum, setSavingAlbum] = useState(false);
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setFormError(null);
-    const form = new FormData(event.currentTarget);
+    setSavingAlbum(true);
     try {
+      const form = new FormData(event.currentTarget);
+      const nome_album = String(form.get("album") ?? "").trim();
+
+      if (!nome_album) {
+        onToast("Inserisci un nome per l'album.");
+        return;
+      }
+
       const { error } = await getSupabase().from("album_progetti").insert({
         creato_da: user.id,
-        nome_album: form.get("album"),
+        nome_album,
       });
-      if (error) throw error;
-      event.currentTarget.reset();
-      setShowNewAlbum(false);
-      await reload();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Errore nella creazione dell'album.");
-    }
-  }
 
-  async function deleteAlbum(album: Album) {
-    try {
-      const { error } = await getSupabase().from("album_progetti").delete().eq("id", album.id);
-      if (error) throw error;
+      if (error) {
+        onToast(`Errore album: ${error.message}`);
+        return;
+      }
+
+      onToast("Album creato.", "success");
+      (event.target as HTMLFormElement).reset();
       await reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nell'eliminazione dell'album.");
+    } finally {
+      setSavingAlbum(false);
     }
   }
 
@@ -896,189 +700,114 @@ function Projects({
     setUploadingTrack(true);
     try {
       const form = new FormData(event.currentTarget);
+      const nome_traccia = String(form.get("nome_traccia") ?? "").trim();
+
+      if (!nome_traccia) {
+        onToast("Inserisci un nome per la traccia.");
+        return;
+      }
+
       const fileInput = event.currentTarget.querySelector<HTMLInputElement>('input[type="file"]');
       const file = fileInput?.files?.[0];
       const supabase = getSupabase();
       let audio_file_url: string | null = null;
 
       if (file) {
-        const filePath = `audio/${Date.now()}-${file.name}`;
-        const { error: storageError } = await supabase.storage.from("superfluido_bucket").upload(filePath, file);
-        if (storageError) throw storageError;
-        const { data: urlData } = supabase.storage.from("superfluido_bucket").getPublicUrl(filePath);
+        const filePath = `${Date.now()}-${file.name}`;
+        const { error: storageError } = await supabase.storage.from("audio").upload(filePath, file);
+        if (storageError) {
+          onToast(`Errore upload audio: ${storageError.message}`);
+          return;
+        }
+        const { data: urlData } = supabase.storage.from("audio").getPublicUrl(filePath);
         audio_file_url = urlData.publicUrl;
       }
 
       const { error } = await supabase.from("tracce_audio").insert({
         caricato_da: user.id,
-        album_id: selectedAlbum?.id ?? null,
-        nome_traccia: form.get("nome_traccia"),
+        album_id: form.get("album_id") || null,
+        nome_traccia,
         fase: form.get("fase"),
         audio_file_url,
       });
-      if (error) throw error;
-      event.currentTarget.reset();
-      setShowAddTrack(false);
+
+      if (error) {
+        onToast(`Errore traccia: ${error.message}`);
+        return;
+      }
+
+      onToast("Traccia aggiunta.", "success");
+      (event.target as HTMLFormElement).reset();
       await reload();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Errore nell'aggiunta della traccia.");
     } finally {
       setUploadingTrack(false);
     }
   }
 
-  // ── Library view ──────────────────────────────────────────────────────────
-
-  if (studioView === "library") {
-    return (
-      <>
-        <ModuleHeader
-          title="Studio Hub"
-          text="Libreria album, tracce in produzione e upload audio direttamente su Supabase Storage."
-          icon={Disc3}
-          actions={
-            <button
-              onClick={() => setShowNewAlbum(!showNewAlbum)}
-              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-xs font-black text-black transition hover:bg-orange-300"
-            >
-              <Plus size={15} />
-              Nuovo album
-            </button>
-          }
-        />
-
-        {showNewAlbum && (
-          <form onSubmit={createAlbum} className="glass mb-5 rounded-md p-5">
-            <div className="flex items-end gap-4">
-              <div className="flex-1">
-                <Input name="album" label="Nome album" required />
-              </div>
-              <div className="flex gap-2">
-                <button type="submit" className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-sm font-black text-black transition hover:bg-orange-300">
-                  <Plus size={16} />
-                  Crea
-                </button>
-                <button type="button" onClick={() => setShowNewAlbum(false)} className="rounded-md border border-white/15 px-4 py-2.5 text-sm text-white/60 hover:text-white">
-                  Annulla
-                </button>
-              </div>
-            </div>
-            <FormError text={formError} />
-          </form>
-        )}
-
-        <div className="glass rounded-md p-8">
-          {albums.length === 0 ? (
-            <div className="py-16 text-center">
-              <Disc3 size={48} className="mx-auto mb-4 text-white/15" />
-              <p className="text-lg font-bold text-white/40">Nessun album ancora</p>
-              <p className="mt-2 text-sm text-white/28">Clicca &ldquo;Nuovo album&rdquo; per iniziare a organizzare le tue produzioni.</p>
-            </div>
-          ) : (
-            <div className="flex flex-wrap justify-center gap-10 sm:justify-start sm:gap-12">
-              {albums.map((album) => {
-                const count = tracks.filter(
-                  (t) => String(t.album_id) === String(album.id) || String(t.album_progetti?.id) === String(album.id),
-                ).length;
-                return (
-                  <AlbumCard
-                    key={album.id}
-                    album={album}
-                    trackCount={count}
-                    onClick={() => { setSelectedAlbum(album); setStudioView("project"); }}
-                    onDelete={() => deleteAlbum(album)}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </>
-    );
-  }
-
-  // ── Project detail view ───────────────────────────────────────────────────
-
   return (
     <>
-      <div className="mb-6 flex items-center gap-3">
-        <button
-          onClick={() => { setStudioView("library"); setShowAddTrack(false); }}
-          className="inline-flex items-center gap-1.5 rounded-md border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-white/60 hover:text-white"
-        >
-          <ChevronLeft size={16} />
-          Libreria
-        </button>
-      </div>
+      <ModuleHeader title="Studio Hub" text="Album, tracce, fasi di produzione e player per gli asset audio caricati su Supabase Storage." icon={Disc3} />
+      <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
+        <div className="flex flex-col gap-5">
+          <form onSubmit={createAlbum} className="glass rounded-md p-5">
+            <p className="text-lg font-black text-white">Album workspace</p>
+            <Input name="album" label="Nome album" required />
+            <ActionButton icon={Plus} text="Crea album" loading={savingAlbum} />
+            <div className="mt-6 space-y-3">
+              {albums.map((album) => (
+                <div key={album.id} className="rounded-md border border-white/10 bg-white/[0.04] p-3">
+                  <p className="font-bold text-white">{album.nome_album}</p>
+                </div>
+              ))}
+            </div>
+          </form>
 
-      <div className="grid gap-8 lg:grid-cols-[280px_1fr] xl:grid-cols-[340px_1fr]">
-        {/* Left: album info */}
-        <div className="lg:sticky lg:top-28 lg:self-start">
-          <div className={`aspect-square w-full max-w-[260px] rounded-2xl bg-gradient-to-br ${albumGradient(selectedAlbum?.nome_album ?? "")} mx-auto lg:mx-0`} />
-          <h2 className="mt-6 text-3xl font-black tracking-tight text-white">{selectedAlbum?.nome_album}</h2>
-          <p className="mt-1 text-sm text-white/50">SUPERFLUIDO</p>
-          <p className="mt-1 font-mono text-xs uppercase tracking-widest text-white/35">{albumTracks.length} tracce</p>
-          <button
-            onClick={() => setShowAddTrack(!showAddTrack)}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-bold text-white/70 transition hover:border-orange-400/30 hover:text-orange-200"
-          >
-            <Plus size={16} />
-            Aggiungi traccia
-          </button>
-
-          {showAddTrack && (
-            <form onSubmit={addTrack} className="glass mt-4 rounded-md p-4">
-              <Input name="nome_traccia" label="Nome traccia" required />
-              <Select name="fase" label="Fase" options={["Demo", "Mix", "Master"]} />
-              <label className="mt-4 block">
-                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File audio</span>
-                <input type="file" accept="audio/*" className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
-              </label>
-              <FormError text={formError} />
-              <button
-                type="submit"
-                disabled={uploadingTrack}
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
-              >
-                {uploadingTrack ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
-                Carica
-              </button>
-            </form>
-          )}
+          <form onSubmit={addTrack} className="glass rounded-md p-5">
+            <p className="text-lg font-black text-white">Aggiungi traccia</p>
+            <Input name="nome_traccia" label="Nome traccia" required />
+            <Select name="fase" label="Fase" options={TRACK_PHASES} />
+            <label className="mt-4 block">
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">Album</span>
+              <select name="album_id" className="field mt-2 rounded-md px-3 py-2.5 text-sm">
+                <option value="" className="bg-neutral-950">Nessun album</option>
+                {albums.map((album) => (
+                  <option key={album.id} value={album.id} className="bg-neutral-950">{album.nome_album}</option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-4 block">
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File audio</span>
+              <input type="file" accept="audio/*" className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
+            </label>
+            <button disabled={uploadingTrack} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
+              {uploadingTrack ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
+              Aggiungi traccia
+            </button>
+          </form>
         </div>
 
-        {/* Right: tracklist */}
-        <div className="glass rounded-md overflow-hidden">
-          {albumTracks.length === 0 ? (
-            <div className="py-16 text-center">
-              <FileAudio size={36} className="mx-auto mb-4 text-white/15" />
-              <p className="text-sm text-white/35">Nessuna traccia in questo album.</p>
-              <p className="mt-1 text-xs text-white/25">Usa il pulsante &ldquo;Aggiungi traccia&rdquo; per caricare il primo file.</p>
-            </div>
+        <div className="glass rounded-md p-5">
+          {tracks.length === 0 ? (
+            <p className="py-10 text-center text-sm text-white/40">Nessuna traccia caricata.</p>
           ) : (
-            <ul>
-              {albumTracks.map((track, index) => (
-                <li
-                  key={track.id}
-                  className="border-b border-white/8 px-5 py-4 last:border-0 hover:bg-white/[0.025]"
-                >
-                  <div className="flex items-center gap-4">
-                    <span className="w-7 shrink-0 text-right font-mono text-sm text-white/25">{index + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-bold text-white">{track.nome_traccia}</p>
-                      {track.audio_file_url ? (
-                        <audio className="mt-2 h-8 w-full" controls src={track.audio_file_url} />
-                      ) : (
-                        <p className="mt-0.5 text-xs text-white/30">Audio non caricato</p>
-                      )}
+            <div className="grid gap-4 md:grid-cols-2">
+              {tracks.map((track) => (
+                <article key={track.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200">{track.fase || "Demo"}</p>
+                      <h3 className="mt-2 text-xl font-black text-white">{track.nome_traccia}</h3>
+                      <p className="mt-1 text-sm text-white/45">{track.album_progetti?.nome_album || "Album non assegnato"}</p>
                     </div>
-                    <span className="shrink-0 rounded border border-orange-400/25 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-orange-200">
-                      {track.fase || "Demo"}
-                    </span>
+                    <FileAudio className="text-white/25" />
                   </div>
-                </li>
+                  {track.audio_file_url
+                    ? <audio className="mt-4 w-full" controls src={track.audio_file_url} />
+                    : <div className="mt-4 h-10 rounded-md border border-dashed border-white/12 text-center text-xs leading-10 text-white/35">Audio non caricato</div>
+                  }
+                </article>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       </div>
@@ -1086,82 +815,18 @@ function Projects({
   );
 }
 
-function AlbumCard({
-  album,
-  trackCount,
-  onClick,
-  onDelete,
-}: {
-  album: Album;
-  trackCount: number;
-  onClick: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div className="group relative text-left" style={{ maxWidth: 168 }}>
-      <button onClick={onClick} className="block w-full text-left">
-        <div className="relative">
-          <div className={`h-36 w-36 rounded-2xl bg-gradient-to-br ${albumGradient(album.nome_album)} transition duration-200 group-hover:brightness-75`} />
-          <div className="absolute -bottom-3 -right-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-orange-500 opacity-0 shadow-lg transition duration-200 group-hover:opacity-100">
-            <Play size={16} fill="black" className="ml-0.5 text-black" />
-          </div>
-        </div>
-        <p className="mt-5 truncate text-sm font-bold text-white">{album.nome_album}</p>
-        <p className="mt-0.5 text-xs text-white/45">{trackCount} {trackCount === 1 ? "traccia" : "tracce"}</p>
-      </button>
-      <button
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="absolute -right-2 -top-2 hidden h-7 w-7 items-center justify-center rounded-full border border-red-400/30 bg-neutral-950 text-red-300 shadow hover:bg-red-500/15 group-hover:flex"
-        title="Elimina album"
-      >
-        <Trash2 size={12} />
-      </button>
-    </div>
-  );
-}
-
-// ─── AI Press Kit ─────────────────────────────────────────────────────────────
-
-const MEMBERS = ["Eric Draven", "Martire", "gg.Proiettili", "NONe", "Slam aka Hysteriack", "Leony47", "Giord"];
-
-const OUTPUT_TYPES = ["Press Kit completo", "Tech Rider", "Bio breve", "Caption social"] as const;
-type OutputType = (typeof OUTPUT_TYPES)[number];
-
-const DEFAULT_PROMPTS: Record<OutputType, string> = {
-  "Press Kit completo": "Genera un press kit completo per il collettivo, includendo bio artistica, pitch editoriale, punti di forza e contatti booking.",
-  "Tech Rider": "Genera un tech rider completo per il live, con stage plot testuale, lista equipment PA e monitor, hospitality e note tecniche per il service audio.",
-  "Bio breve": "Scrivi una bio breve (max 150 parole) per uso booking e social, focalizzata sui membri presenti all'evento.",
-  "Caption social": "Scrivi una caption per Instagram (max 280 caratteri) per promuovere l'evento o la release, con hashtag rilevanti e call to action.",
-};
-
 function PressKit({ state }: { state: AppState }) {
-  const [outputType, setOutputType] = useState<OutputType>("Press Kit completo");
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPTS["Press Kit completo"]);
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([...MEMBERS]);
+  const [prompt, setPrompt] = useState("Genera un press kit sintetico per la prossima release, includendo bio, pitch editoriale, punti forza e caption social.");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
-
-  function toggleMember(name: string) {
-    setSelectedMembers((prev) =>
-      prev.includes(name) ? prev.filter((m) => m !== name) : [...prev, name],
-    );
-  }
-
-  function handleOutputTypeChange(type: OutputType) {
-    setOutputType(type);
-    setPrompt(DEFAULT_PROMPTS[type]);
-  }
-
   const context = useMemo(
     () => ({
-      tipoOutput: outputType,
-      membriPresenti: selectedMembers,
       profiles: state.profiles,
       tracks: state.tracks.slice(0, 8),
       events: state.events.slice(0, 6),
       inventory: state.products.slice(0, 6),
     }),
-    [state, outputType, selectedMembers],
+    [state],
   );
 
   async function generate() {
@@ -1185,59 +850,17 @@ function PressKit({ state }: { state: AppState }) {
 
   return (
     <>
-      <ModuleHeader title="AI Press Kit" text="Generazione documenti via Groq con bio reale del collettivo e selezione membri per evento." icon={Bot} />
-      <div className="grid gap-5 lg:grid-cols-[400px_1fr]">
-        <div className="space-y-4">
-          {/* Output type */}
-          <div className="glass rounded-md p-5">
-            <p className="mb-3 text-sm font-black text-white">Tipo documento</p>
-            <div className="grid grid-cols-2 gap-2">
-              {OUTPUT_TYPES.map((type) => (
-                <button
-                  key={type}
-                  onClick={() => handleOutputTypeChange(type)}
-                  className={`rounded-md border px-3 py-2 text-xs font-bold text-left transition ${
-                    outputType === type
-                      ? "border-orange-400/60 bg-orange-500/15 text-orange-200"
-                      : "border-white/10 bg-white/[0.03] text-white/55 hover:text-white"
-                  }`}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Members selector */}
-          <div className="glass rounded-md p-5">
-            <p className="mb-3 text-sm font-black text-white">Membri presenti</p>
-            <div className="space-y-2">
-              {MEMBERS.map((member) => (
-                <label key={member} className="flex cursor-pointer items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedMembers.includes(member)}
-                    onChange={() => toggleMember(member)}
-                    className="h-4 w-4 accent-orange-500"
-                  />
-                  <span className="text-sm text-white/75">{member}</span>
-                </label>
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-white/35">{selectedMembers.length} di {MEMBERS.length} selezionati</p>
-          </div>
-
-          {/* Prompt */}
-          <div className="glass rounded-md p-5">
-            <Textarea label="Prompt operativo" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={6} />
-            <button
-              onClick={generate}
-              disabled={loading}
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
-            >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-              Genera con Groq
-            </button>
+      <ModuleHeader title="AI Press Kit" text="Generazione reale via Groq, compatibile con il formato OpenAI Chat Completions e isolata lato server." icon={Bot} />
+      <div className="grid gap-5 lg:grid-cols-[430px_1fr]">
+        <div className="glass rounded-md p-5">
+          <Textarea label="Prompt operativo" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={9} />
+          <button onClick={generate} disabled={loading} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            Genera con Groq
+          </button>
+          <div className="mt-5 rounded-md border border-white/10 bg-black/30 p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">Contesto inviato</p>
+            <p className="mt-2 text-sm text-white/58">{state.profiles.length} profili, {state.tracks.length} tracce, {state.events.length} eventi.</p>
           </div>
         </div>
 
@@ -1246,47 +869,47 @@ function PressKit({ state }: { state: AppState }) {
             <p className="font-black text-white">Output AI</p>
             <Sparkles size={18} className="text-orange-300" />
           </div>
-          {answer ? (
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-white/75">{answer}</pre>
-          ) : (
-            <p className="text-sm text-white/25">{loading ? "Generazione in corso…" : "L'output apparirà qui."}</p>
-          )}
+          <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-white/75">{answer || "L'output generato apparirà qui."}</pre>
         </div>
       </div>
     </>
   );
 }
 
-// ─── Profiles ─────────────────────────────────────────────────────────────────
+function Profiles({ profiles, user, reload, onToast }: { profiles: ArtistProfile[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
+  const [saving, setSaving] = useState(false);
 
-function Profiles({
-  profiles,
-  user,
-  reload,
-  onError,
-}: {
-  profiles: ArtistProfile[];
-  user: AppUser;
-  reload: () => Promise<void>;
-  onError: (msg: string) => void;
-}) {
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    setSaving(true);
     try {
+      const form = new FormData(event.currentTarget);
+      const nome_arte = String(form.get("nome_arte") ?? "").trim();
+
+      if (!nome_arte) {
+        onToast("Il nome arte è obbligatorio.");
+        return;
+      }
+
       const { error } = await getSupabase().from("profili_artisti").upsert({
         user_id: user.id,
-        nome_arte: form.get("nome_arte"),
-        strumentazione: form.get("strumentazione"),
-        bio_breve: form.get("bio_breve"),
-        email_contatto: form.get("email_contatto"),
-        link_instagram: form.get("link_instagram"),
-        link_spotify: form.get("link_spotify"),
+        nome_arte,
+        strumentazione: form.get("strumentazione") || null,
+        bio_breve: form.get("bio_breve") || null,
+        email_contatto: form.get("email_contatto") || null,
+        link_instagram: form.get("link_instagram") || null,
+        link_spotify: form.get("link_spotify") || null,
       });
-      if (error) throw error;
+
+      if (error) {
+        onToast(`Errore profilo: ${error.message}`);
+        return;
+      }
+
+      onToast("Profilo salvato.", "success");
       await reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nel salvataggio del profilo.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -1301,109 +924,89 @@ function Profiles({
           <Input name="link_instagram" label="Instagram" />
           <Input name="link_spotify" label="Spotify" />
           <Textarea name="bio_breve" label="Bio breve" />
-          <ActionButton icon={Download} text="Salva profilo" />
+          <ActionButton icon={Download} text="Salva profilo" loading={saving} />
         </form>
         <div className="grid gap-4 md:grid-cols-2">
-          {profiles.length === 0 ? (
-            <div className="col-span-2 py-12 text-center text-sm text-white/35">
-              Nessun profilo. Compila il form per aggiungere la tua scheda artista.
-            </div>
-          ) : (
-            profiles.map((profile) => (
-              <article key={profile.user_id} className="glass rounded-md p-5">
-                <p className="text-2xl font-black text-white">{profile.nome_arte || "Profilo senza nome"}</p>
-                <p className="mt-2 text-sm text-orange-200">{profile.strumentazione || "Setup non indicato"}</p>
-                <p className="mt-4 text-sm leading-6 text-white/60">{profile.bio_breve || "Bio non ancora compilata."}</p>
-              </article>
-            ))
-          )}
+          {profiles.map((profile) => (
+            <article key={profile.user_id} className="glass rounded-md p-5">
+              <p className="text-2xl font-black text-white">{profile.nome_arte || "Profilo senza nome"}</p>
+              <p className="mt-2 text-sm text-orange-200">{profile.strumentazione || "Setup non indicato"}</p>
+              <p className="mt-4 text-sm leading-6 text-white/60">{profile.bio_breve || "Bio non ancora compilata."}</p>
+            </article>
+          ))}
         </div>
       </div>
     </>
   );
 }
 
-// ─── Vault ────────────────────────────────────────────────────────────────────
-
-function Vault({
-  files,
-  folders,
-  user,
-  reload,
-  onError,
-}: {
-  files: VaultFile[];
-  folders: VaultFolder[];
-  user: AppUser;
-  reload: () => Promise<void>;
-  onError: (msg: string) => void;
-}) {
-  const [activeFolder, setActiveFolder] = useState<string>("Tutti");
+function Vault({ files, folders, user, reload, onToast }: { files: VaultFile[]; folders: VaultFolder[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [uploading, setUploading] = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
+  const [activeFolder, setActiveFolder] = useState<string>("Tutti");
   const [showNewFolder, setShowNewFolder] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
 
   const folderNames = folders.map((f) => f.nome);
   const allFolderTabs = ["Tutti", ...folderNames];
-
-  const filtered = activeFolder === "Tutti" ? files : files.filter((f) => f.cartella === activeFolder);
-  const folderCount = (folder: string) =>
-    folder === "Tutti" ? files.length : files.filter((f) => f.cartella === folder).length;
+  const filteredFiles = activeFolder === "Tutti" ? files : files.filter((f) => f.cartella === activeFolder);
 
   async function createFolder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const nome = String(form.get("nome") ?? "").trim();
+    const data = new FormData(event.currentTarget);
+    const nome = String(data.get("nome") ?? "").trim();
     if (!nome) return;
-    try {
-      const { error } = await getSupabase().from("vault_cartelle").insert({ nome, creato_da: user.id });
-      if (error) throw error;
-      event.currentTarget.reset();
-      setShowNewFolder(false);
-      await reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nella creazione della cartella.");
-    }
+    const { error } = await getSupabase().from("vault_cartelle").insert({ nome, creato_da: user.id });
+    if (error) { onToast(`Errore cartella: ${error.message}`); return; }
+    event.currentTarget.reset();
+    setShowNewFolder(false);
+    await reload();
   }
 
   async function deleteFile(file: VaultFile) {
-    try {
-      const { error } = await getSupabase().from("vault_documenti").delete().eq("id", file.id);
-      if (error) throw error;
-      await reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nell'eliminazione del file.");
+    const { error } = await getSupabase().from("vault_documenti").delete().eq("id", file.id);
+    if (error) {
+      onToast(`Errore eliminazione: ${error.message}`);
+      return;
     }
+    onToast("File eliminato.", "success");
+    await reload();
   }
 
   async function uploadFile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setFormError(null);
     setUploading(true);
     try {
       const form = new FormData(event.currentTarget);
       const fileInput = event.currentTarget.querySelector<HTMLInputElement>('input[type="file"]');
       const file = fileInput?.files?.[0];
-      if (!file) return;
+      if (!file) {
+        onToast("Seleziona un file da caricare.");
+        return;
+      }
 
       const supabase = getSupabase();
-      const filePath = `vault/${Date.now()}-${file.name}`;
-      const { error: storageError } = await supabase.storage.from("superfluido_bucket").upload(filePath, file);
-      if (storageError) throw storageError;
+      const filePath = `${Date.now()}-${file.name}`;
+      const { error: storageError } = await supabase.storage.from("vault").upload(filePath, file);
+      if (storageError) {
+        onToast(`Errore upload: ${storageError.message}`);
+        return;
+      }
 
-      const { data: urlData } = supabase.storage.from("superfluido_bucket").getPublicUrl(filePath);
-      const { error } = await supabase.from("vault_documenti").insert({
+      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+      const { error: dbError } = await supabase.from("vault_documenti").insert({
         nome_file: (form.get("nome_file") as string) || file.name,
-        cartella: form.get("cartella") || activeFolder === "Tutti" ? "Altro" : activeFolder,
+        cartella: form.get("cartella"),
         file_url: urlData.publicUrl,
+        caricato_da: user.id,
       });
-      if (error) throw error;
-      event.currentTarget.reset();
-      setShowUpload(false);
+
+      if (dbError) {
+        onToast(`Errore salvataggio: ${dbError.message}`);
+        return;
+      }
+
+      onToast("File caricato.", "success");
+      (event.target as HTMLFormElement).reset();
       await reload();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Errore nel caricamento del file.");
     } finally {
       setUploading(false);
     }
@@ -1411,52 +1014,9 @@ function Vault({
 
   return (
     <>
-      <ModuleHeader
-        title="Vault"
-        text="Documenti, contratti, rider e asset organizzati per cartella."
-        icon={Archive}
-        actions={
-          <button
-            onClick={() => setShowUpload(!showUpload)}
-            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-xs font-black text-black transition hover:bg-orange-300"
-          >
-            <UploadCloud size={15} />
-            Carica file
-          </button>
-        }
-      />
-
-      {/* Upload form */}
-      {showUpload && (
-        <form onSubmit={uploadFile} className="glass mb-5 rounded-md p-5">
-          <p className="mb-4 font-black text-white">Carica nuovo documento</p>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Input name="nome_file" label="Nome file (opzionale)" />
-            <Select name="cartella" label="Cartella" options={["Press", "Live", "Amministrazione", "Altro"]} />
-            <label className="mt-4 block">
-              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File</span>
-              <input type="file" required className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
-            </label>
-          </div>
-          <FormError text={formError} />
-          <div className="mt-4 flex gap-3">
-            <button
-              type="submit"
-              disabled={uploading}
-              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-5 py-2.5 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
-            >
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
-              Carica
-            </button>
-            <button type="button" onClick={() => setShowUpload(false)} className="rounded-md border border-white/15 px-4 py-2.5 text-sm text-white/55 hover:text-white">
-              Annulla
-            </button>
-          </div>
-        </form>
-      )}
-
-      <div className="grid gap-5 lg:grid-cols-[200px_1fr]">
-        {/* Left: folder nav */}
+      <ModuleHeader title="Vault" text="Documenti, contratti e asset organizzati per cartelle." icon={Archive} />
+      <div className="grid gap-5 lg:grid-cols-[180px_1fr_300px]">
+        {/* Sidebar cartelle */}
         <div className="glass h-fit rounded-md p-4">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">Cartelle</p>
@@ -1468,101 +1028,78 @@ function Vault({
               <Plus size={12} />
             </button>
           </div>
-
           {showNewFolder && (
             <form onSubmit={createFolder} className="mb-3 flex gap-1">
-              <input
-                name="nome"
-                required
-                placeholder="Nome cartella"
-                className="field min-w-0 flex-1 rounded px-2 py-1.5 text-xs"
-              />
-              <button type="submit" className="rounded bg-orange-500 px-2 py-1.5 text-xs font-black text-black">
-                +
-              </button>
+              <input name="nome" required placeholder="Nome" className="field min-w-0 flex-1 rounded px-2 py-1.5 text-xs" />
+              <button type="submit" className="rounded bg-orange-500 px-2 py-1.5 text-xs font-black text-black">+</button>
             </form>
           )}
-
           {allFolderTabs.map((folder) => (
             <button
               key={folder}
               onClick={() => setActiveFolder(folder)}
               className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
-                activeFolder === folder
-                  ? "bg-orange-500/15 font-bold text-orange-200"
-                  : "text-white/50 hover:bg-white/[0.04] hover:text-white"
+                activeFolder === folder ? "bg-orange-500/15 font-bold text-orange-200" : "text-white/50 hover:bg-white/[0.04] hover:text-white"
               }`}
             >
               <span>{folder}</span>
-              <span className="font-mono text-xs opacity-60">{folderCount(folder)}</span>
+              <span className="font-mono text-xs opacity-55">
+                {folder === "Tutti" ? files.length : files.filter((f) => f.cartella === folder).length}
+              </span>
             </button>
           ))}
         </div>
 
-        {/* Right: file table */}
-        <div className="glass rounded-md overflow-hidden">
-          {filtered.length === 0 ? (
-            <div className="py-16 text-center">
-              <Archive size={36} className="mx-auto mb-4 text-white/15" />
-              <p className="text-sm text-white/35">
-                {activeFolder === "Tutti" ? "Nessun file nel vault." : `Nessun file nella cartella "${activeFolder}".`}
-              </p>
-              <p className="mt-1 text-xs text-white/22">Usa &ldquo;Carica file&rdquo; in alto per aggiungere documenti.</p>
-            </div>
+        {/* File grid */}
+        <div className="glass rounded-md p-5">
+          {filteredFiles.length === 0 ? (
+            <p className="py-10 text-center text-sm text-white/40">
+              {activeFolder === "Tutti" ? "Nessun documento nel vault." : `Nessun file in "${activeFolder}".`}
+            </p>
           ) : (
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="text-[10px] uppercase tracking-widest text-white/30">
-                <tr>
-                  <th className="border-b border-white/8 px-5 py-3">Nome file</th>
-                  <th className="border-b border-white/8 px-5 py-3">Cartella</th>
-                  <th className="border-b border-white/8 px-5 py-3">Data</th>
-                  <th className="border-b border-white/8 px-5 py-3 text-right">Azioni</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((file) => (
-                  <tr key={file.id} className="border-b border-white/[0.06] hover:bg-white/[0.025]">
-                    <td className="px-5 py-3.5 font-bold text-white">{file.nome_file}</td>
-                    <td className="px-5 py-3.5">
-                      <span className="rounded border border-orange-400/20 px-2 py-0.5 text-xs font-mono text-orange-200">
-                        {file.cartella || "—"}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 font-mono text-xs text-white/40">
-                      {file.created_at ? new Date(file.created_at).toLocaleDateString("it-IT") : "—"}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center justify-end gap-2">
-                        <a
-                          href={file.file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-md border border-white/12 bg-white/[0.05] px-3 py-1.5 text-xs font-bold text-white hover:bg-white/10"
-                        >
-                          <Download size={13} />
-                          Apri
-                        </a>
-                        <button
-                          onClick={() => deleteFile(file)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-400/25 text-red-300 hover:bg-red-500/10"
-                          title="Elimina"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="grid gap-4 md:grid-cols-2">
+              {filteredFiles.map((file) => (
+                <article key={file.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200">{file.cartella}</p>
+                  <h3 className="mt-2 font-black text-white">{file.nome_file}</h3>
+                  <div className="mt-5 flex gap-2">
+                    <a href={file.file_url} className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-white/8 px-3 py-2 text-xs font-bold text-white hover:bg-white/12" target="_blank" rel="noreferrer">
+                      <Download size={15} />
+                      Apri
+                    </a>
+                    {user.role === "master" ? (
+                      <button onClick={() => deleteFile(file)} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10">
+                        <Trash2 size={15} />
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
           )}
         </div>
+
+        {/* Upload form */}
+        <form onSubmit={uploadFile} className="glass h-fit rounded-md p-5">
+          <p className="text-lg font-black text-white">Carica documento</p>
+          <p className="mt-1 text-sm text-white/50">Upload su Supabase Storage bucket "vault".</p>
+          <Input name="nome_file" label="Nome file (opzionale)" />
+          <Select name="cartella" label="Cartella" options={folderNames.length ? folderNames : ["Press", "Live", "Amministrazione", "Altro"]} />
+          <label className="mt-4 block">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File</span>
+            <input type="file" required className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
+          </label>
+          <button disabled={uploading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
+            {uploading ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
+            Carica
+          </button>
+        </form>
       </div>
     </>
   );
 }
 
-// ─── Kanban ───────────────────────────────────────────────────────────────────
+// ── KanbanBoard ──────────────────────────────────────────────
 
 const KANBAN_STATI = ["Da Fare", "In Corso", "Completato"] as const;
 type KanbanStato = (typeof KANBAN_STATI)[number];
@@ -1571,34 +1108,34 @@ function KanbanBoard({
   tasks,
   user,
   reload,
-  onError,
+  onToast,
 }: {
   tasks: KanbanTask[];
   user: AppUser;
   reload: () => Promise<void>;
-  onError: (msg: string) => void;
+  onToast: (text: string, kind?: "error" | "success") => void;
 }) {
-  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setFormError(null);
-    const data = new FormData(event.currentTarget);
-    const titolo = String(data.get("titolo") ?? "").trim();
-    if (!titolo) return;
+    setSaving(true);
     try {
-      const supabase = getSupabase();
-      const { error } = await supabase.from("tasks_kanban").insert({
+      const data = new FormData(event.currentTarget);
+      const titolo = String(data.get("titolo") ?? "").trim();
+      if (!titolo) { onToast("Inserisci un titolo."); return; }
+      const { error } = await getSupabase().from("tasks_kanban").insert({
         titolo,
         stato: String(data.get("stato") ?? "Da Fare"),
         scadenza: String(data.get("scadenza") ?? "") || null,
         assegnato_a: user.email,
       });
-      if (error) throw error;
-      event.currentTarget.reset();
+      if (error) { onToast(`Errore task: ${error.message}`); return; }
+      onToast("Task aggiunto.", "success");
+      (event.target as HTMLFormElement).reset();
       await reload();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Errore nella creazione del task.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -1606,37 +1143,32 @@ function KanbanBoard({
     const idx = KANBAN_STATI.indexOf(task.stato as KanbanStato);
     const nextIdx = direction === "next" ? idx + 1 : idx - 1;
     if (nextIdx < 0 || nextIdx >= KANBAN_STATI.length) return;
-    try {
-      const supabase = getSupabase();
-      const { error } = await supabase
-        .from("tasks_kanban")
-        .update({ stato: KANBAN_STATI[nextIdx] })
-        .eq("id", task.id);
-      if (error) throw error;
-      await reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore aggiornamento stato.");
-    }
+    const { error } = await getSupabase().from("tasks_kanban").update({ stato: KANBAN_STATI[nextIdx] }).eq("id", task.id);
+    if (error) { onToast(`Errore: ${error.message}`); return; }
+    await reload();
   }
 
   async function deleteTask(task: KanbanTask) {
-    try {
-      const supabase = getSupabase();
-      const { error } = await supabase.from("tasks_kanban").delete().eq("id", task.id);
-      if (error) throw error;
-      await reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore eliminazione task.");
-    }
+    const { error } = await getSupabase().from("tasks_kanban").delete().eq("id", task.id);
+    if (error) { onToast(`Errore: ${error.message}`); return; }
+    onToast("Task eliminato.", "success");
+    await reload();
   }
+
+  const colColors: Record<KanbanStato, string> = {
+    "Da Fare": "border-white/10 bg-white/[0.025]",
+    "In Corso": "border-orange-400/20 bg-orange-500/[0.05]",
+    "Completato": "border-emerald-400/20 bg-emerald-500/[0.05]",
+  };
+  const dotColors: Record<KanbanStato, string> = {
+    "Da Fare": "bg-white/30",
+    "In Corso": "bg-orange-400",
+    "Completato": "bg-emerald-400",
+  };
 
   return (
     <>
-      <ModuleHeader
-        title="Task Board"
-        text="Kanban per la gestione dei task del collettivo — Da Fare, In Corso, Completato."
-        icon={ClipboardList}
-      />
+      <ModuleHeader title="Task Board" text="Kanban del collettivo — Da Fare, In Corso, Completato." icon={ClipboardList} />
 
       <form onSubmit={createTask} className="glass mb-6 rounded-md p-5">
         <p className="mb-4 font-black text-white">Nuovo task</p>
@@ -1645,31 +1177,12 @@ function KanbanBoard({
           <Select name="stato" label="Stato iniziale" options={[...KANBAN_STATI]} />
           <Input name="scadenza" label="Scadenza (opzionale)" type="date" />
         </div>
-        <FormError text={formError} />
-        <div className="mt-4">
-          <button
-            type="submit"
-            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-5 py-2.5 text-sm font-black text-black transition hover:bg-orange-300"
-          >
-            <Plus size={16} />
-            Aggiungi task
-          </button>
-        </div>
+        <ActionButton icon={Plus} text="Aggiungi task" loading={saving} />
       </form>
 
       <div className="grid gap-4 lg:grid-cols-3">
         {KANBAN_STATI.map((stato) => {
           const col = tasks.filter((t) => t.stato === stato);
-          const colColors: Record<KanbanStato, string> = {
-            "Da Fare": "border-white/10 bg-white/[0.025]",
-            "In Corso": "border-orange-400/20 bg-orange-500/[0.05]",
-            "Completato": "border-emerald-400/20 bg-emerald-500/[0.05]",
-          };
-          const dotColors: Record<KanbanStato, string> = {
-            "Da Fare": "bg-white/30",
-            "In Corso": "bg-orange-400",
-            "Completato": "bg-emerald-400",
-          };
           return (
             <div key={stato} className={`rounded-md border p-4 ${colColors[stato]}`}>
               <div className="mb-4 flex items-center gap-2">
@@ -1677,11 +1190,8 @@ function KanbanBoard({
                 <p className="text-xs font-bold uppercase tracking-widest text-white/55">{stato}</p>
                 <span className="ml-auto font-mono text-xs text-white/30">{col.length}</span>
               </div>
-
               <div className="space-y-3">
-                {col.length === 0 && (
-                  <p className="py-6 text-center text-xs text-white/20">Nessun task</p>
-                )}
+                {col.length === 0 && <p className="py-6 text-center text-xs text-white/20">Nessun task</p>}
                 {col.map((task) => {
                   const stIdx = KANBAN_STATI.indexOf(task.stato as KanbanStato);
                   return (
@@ -1692,16 +1202,13 @@ function KanbanBoard({
                           Scadenza: {new Date(task.scadenza).toLocaleDateString("it-IT")}
                         </p>
                       )}
-                      {task.assegnato_a && (
-                        <p className="mt-0.5 text-[10px] text-white/30">{task.assegnato_a}</p>
-                      )}
+                      {task.assegnato_a && <p className="mt-0.5 text-[10px] text-white/30">{task.assegnato_a}</p>}
                       <div className="mt-3 flex items-center justify-between gap-1">
                         <div className="flex gap-1">
                           <button
                             onClick={() => moveTask(task, "prev")}
                             disabled={stIdx === 0}
                             className="inline-flex h-6 w-6 items-center justify-center rounded border border-white/10 text-white/40 hover:text-white disabled:opacity-20"
-                            title="Sposta indietro"
                           >
                             <ChevronLeft size={13} />
                           </button>
@@ -1709,7 +1216,6 @@ function KanbanBoard({
                             onClick={() => moveTask(task, "next")}
                             disabled={stIdx === KANBAN_STATI.length - 1}
                             className="inline-flex h-6 w-6 items-center justify-center rounded border border-white/10 text-white/40 hover:text-white disabled:opacity-20"
-                            title="Sposta avanti"
                           >
                             <ChevronRight size={13} />
                           </button>
@@ -1717,7 +1223,6 @@ function KanbanBoard({
                         <button
                           onClick={() => deleteTask(task)}
                           className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-400/20 text-red-400/50 hover:bg-red-500/10 hover:text-red-300"
-                          title="Elimina"
                         >
                           <Trash2 size={12} />
                         </button>
@@ -1734,7 +1239,7 @@ function KanbanBoard({
   );
 }
 
-// ─── Form helpers ─────────────────────────────────────────────────────────────
+// ── Componenti UI condivisi ──────────────────────────────────
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
   const { label, className, ...inputProps } = props;
@@ -1756,7 +1261,7 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { l
   );
 }
 
-function Select({ label, name, options }: { label: string; name: string; options: string[] }) {
+function Select({ label, name, options }: { label: string; name: string; options: readonly string[] | string[] }) {
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
@@ -1771,16 +1276,16 @@ function Select({ label, name, options }: { label: string; name: string; options
   );
 }
 
-function ActionButton({ icon: Icon, text }: { icon: typeof Plus; text: string }) {
+function ActionButton({ icon: Icon, text, loading = false }: { icon: typeof Plus; text: string; loading?: boolean }) {
   return (
-    <button className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300">
-      <Icon size={18} />
+    <button disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60">
+      {loading ? <Loader2 size={18} className="animate-spin" /> : <Icon size={18} />}
       {text}
     </button>
   );
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+// ── Utility ──────────────────────────────────────────────────
 
 function formatEuro(value: number | null) {
   if (value == null) return "-";
