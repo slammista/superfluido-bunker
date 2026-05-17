@@ -35,11 +35,14 @@ export async function listDriveItems(folderId: string | null = null) {
   const query = folderId ? `'${folderId}' in parents` : "'root' in parents";
 
   const response = await fetch(
-    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query + " and trashed=false")}&fields=id,name,mimeType,webViewLink,webContentLink,thumbnailLink,createdTime&pageSize=100&orderBy=name`,
+    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query + " and trashed=false")}&fields=files(id,name,mimeType,webViewLink,webContentLink,thumbnailLink,createdTime,size)&pageSize=100&orderBy=folder,name`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
 
-  if (!response.ok) throw new Error("Failed to list Drive items");
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => response.statusText);
+    throw new Error(`Drive API error: ${errBody}`);
+  }
   const data = (await response.json()) as { files: any[] };
   return data.files || [];
 }

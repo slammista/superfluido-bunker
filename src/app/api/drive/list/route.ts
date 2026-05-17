@@ -8,6 +8,8 @@ export async function POST(request: Request) {
     const items = await listDriveItems(folderId || null);
     return Response.json({ items });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    console.error("[Drive list]", msg);
+    return Response.json({ error: msg }, { status: 500 });
   }
 }
