@@ -323,6 +323,16 @@ function Notice({ text }: { text: string }) {
   );
 }
 
+function FormError({ text }: { text: string | null }) {
+  if (!text) return null;
+  return (
+    <div className="mt-3 flex items-start gap-2 rounded-md border border-red-400/30 bg-red-500/10 p-3 text-xs text-red-200">
+      <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+      <p>{text}</p>
+    </div>
+  );
+}
+
 function ModuleHeader({
   title,
   text,
@@ -439,10 +449,12 @@ function Inventory({
   onError: (msg: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
   const filtered = products.filter((p) => `${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase()));
 
   async function addDemoProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFormError(null);
     const data = new FormData(event.currentTarget);
     try {
       const supabase = getSupabase();
@@ -465,7 +477,7 @@ function Inventory({
       event.currentTarget.reset();
       await reload();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nella creazione del prodotto.");
+      setFormError(err instanceof Error ? err.message : "Errore nella creazione del prodotto.");
     }
   }
 
@@ -518,6 +530,7 @@ function Inventory({
           <Input name="category" label="Categoria" defaultValue="Merch" />
           <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
           <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
+          <FormError text={formError} />
           <ActionButton icon={Plus} text="Aggiungi" />
           <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
         </form>
@@ -544,11 +557,13 @@ function CalendarModule({
   const [calView, setCalView] = useState<CalView>("grid");
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [formError, setFormError] = useState<string | null>(null);
 
   const MONTH_NAMES = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
 
   async function createEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFormError(null);
     const form = new FormData(event.currentTarget);
     try {
       const { error } = await getSupabase().from("eventi_calendario").insert({
@@ -565,7 +580,7 @@ function CalendarModule({
       event.currentTarget.reset();
       await reload();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nella creazione dell'evento.");
+      setFormError(err instanceof Error ? err.message : "Errore nella creazione dell'evento.");
     }
   }
 
@@ -700,6 +715,7 @@ function CalendarModule({
           <Input name="place" label="Luogo" />
           <Input name="color" label="Colore" type="color" defaultValue="#ff6b35" />
           <Textarea name="note" label="Note" />
+          <FormError text={formError} />
           <ActionButton icon={Plus} text="Registra data" />
         </form>
       </div>
@@ -824,6 +840,7 @@ function Projects({
   const [showNewAlbum, setShowNewAlbum] = useState(false);
   const [showAddTrack, setShowAddTrack] = useState(false);
   const [uploadingTrack, setUploadingTrack] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const albumTracks = selectedAlbum
     ? tracks.filter(
@@ -835,6 +852,7 @@ function Projects({
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFormError(null);
     const form = new FormData(event.currentTarget);
     try {
       const { error } = await getSupabase().from("album_progetti").insert({
@@ -846,7 +864,17 @@ function Projects({
       setShowNewAlbum(false);
       await reload();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nella creazione dell'album.");
+      setFormError(err instanceof Error ? err.message : "Errore nella creazione dell'album.");
+    }
+  }
+
+  async function deleteAlbum(album: Album) {
+    try {
+      const { error } = await getSupabase().from("album_progetti").delete().eq("id", album.id);
+      if (error) throw error;
+      await reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Errore nell'eliminazione dell'album.");
     }
   }
 
@@ -880,7 +908,7 @@ function Projects({
       setShowAddTrack(false);
       await reload();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nell'aggiunta della traccia.");
+      setFormError(err instanceof Error ? err.message : "Errore nell'aggiunta della traccia.");
     } finally {
       setUploadingTrack(false);
     }
@@ -907,19 +935,22 @@ function Projects({
         />
 
         {showNewAlbum && (
-          <form onSubmit={createAlbum} className="glass mb-5 flex items-end gap-4 rounded-md p-5">
-            <div className="flex-1">
-              <Input name="album" label="Nome album" required />
+          <form onSubmit={createAlbum} className="glass mb-5 rounded-md p-5">
+            <div className="flex items-end gap-4">
+              <div className="flex-1">
+                <Input name="album" label="Nome album" required />
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-sm font-black text-black transition hover:bg-orange-300">
+                  <Plus size={16} />
+                  Crea
+                </button>
+                <button type="button" onClick={() => setShowNewAlbum(false)} className="rounded-md border border-white/15 px-4 py-2.5 text-sm text-white/60 hover:text-white">
+                  Annulla
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button type="submit" className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-sm font-black text-black transition hover:bg-orange-300">
-                <Plus size={16} />
-                Crea
-              </button>
-              <button type="button" onClick={() => setShowNewAlbum(false)} className="rounded-md border border-white/15 px-4 py-2.5 text-sm text-white/60 hover:text-white">
-                Annulla
-              </button>
-            </div>
+            <FormError text={formError} />
           </form>
         )}
 
@@ -942,6 +973,7 @@ function Projects({
                     album={album}
                     trackCount={count}
                     onClick={() => { setSelectedAlbum(album); setStudioView("project"); }}
+                    onDelete={() => deleteAlbum(album)}
                   />
                 );
               })}
@@ -989,6 +1021,7 @@ function Projects({
                 <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File audio</span>
                 <input type="file" accept="audio/*" className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
               </label>
+              <FormError text={formError} />
               <button
                 type="submit"
                 disabled={uploadingTrack}
@@ -1040,18 +1073,37 @@ function Projects({
   );
 }
 
-function AlbumCard({ album, trackCount, onClick }: { album: Album; trackCount: number; onClick: () => void }) {
+function AlbumCard({
+  album,
+  trackCount,
+  onClick,
+  onDelete,
+}: {
+  album: Album;
+  trackCount: number;
+  onClick: () => void;
+  onDelete: () => void;
+}) {
   return (
-    <button onClick={onClick} className="group text-left" style={{ maxWidth: 168 }}>
-      <div className="relative">
-        <div className={`h-36 w-36 rounded-2xl bg-gradient-to-br ${albumGradient(album.nome_album)} transition duration-200 group-hover:brightness-75`} />
-        <div className="absolute -bottom-3 -right-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-orange-500 opacity-0 shadow-lg transition duration-200 group-hover:opacity-100">
-          <Play size={16} fill="black" className="ml-0.5 text-black" />
+    <div className="group relative text-left" style={{ maxWidth: 168 }}>
+      <button onClick={onClick} className="block w-full text-left">
+        <div className="relative">
+          <div className={`h-36 w-36 rounded-2xl bg-gradient-to-br ${albumGradient(album.nome_album)} transition duration-200 group-hover:brightness-75`} />
+          <div className="absolute -bottom-3 -right-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-orange-500 opacity-0 shadow-lg transition duration-200 group-hover:opacity-100">
+            <Play size={16} fill="black" className="ml-0.5 text-black" />
+          </div>
         </div>
-      </div>
-      <p className="mt-5 truncate text-sm font-bold text-white">{album.nome_album}</p>
-      <p className="mt-0.5 text-xs text-white/45">{trackCount} {trackCount === 1 ? "traccia" : "tracce"}</p>
-    </button>
+        <p className="mt-5 truncate text-sm font-bold text-white">{album.nome_album}</p>
+        <p className="mt-0.5 text-xs text-white/45">{trackCount} {trackCount === 1 ? "traccia" : "tracce"}</p>
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        className="absolute -right-2 -top-2 hidden h-7 w-7 items-center justify-center rounded-full border border-red-400/30 bg-neutral-950 text-red-300 shadow hover:bg-red-500/15 group-hover:flex"
+        title="Elimina album"
+      >
+        <Trash2 size={12} />
+      </button>
+    </div>
   );
 }
 
@@ -1260,6 +1312,9 @@ function Profiles({
 
 // ─── Vault ────────────────────────────────────────────────────────────────────
 
+const VAULT_FOLDERS = ["Tutti", "Press", "Live", "Amministrazione", "Altro"] as const;
+type VaultFolder = (typeof VAULT_FOLDERS)[number];
+
 function Vault({
   files,
   user,
@@ -1271,7 +1326,14 @@ function Vault({
   reload: () => Promise<void>;
   onError: (msg: string) => void;
 }) {
+  const [activeFolder, setActiveFolder] = useState<VaultFolder>("Tutti");
   const [uploading, setUploading] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const filtered = activeFolder === "Tutti" ? files : files.filter((f) => f.cartella === activeFolder);
+  const folderCount = (folder: VaultFolder) =>
+    folder === "Tutti" ? files.length : files.filter((f) => f.cartella === folder).length;
 
   async function deleteFile(file: VaultFile) {
     try {
@@ -1285,6 +1347,7 @@ function Vault({
 
   async function uploadFile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFormError(null);
     setUploading(true);
     try {
       const form = new FormData(event.currentTarget);
@@ -1300,14 +1363,15 @@ function Vault({
       const { data: urlData } = supabase.storage.from("superfluido_bucket").getPublicUrl(filePath);
       const { error } = await supabase.from("vault_documenti").insert({
         nome_file: (form.get("nome_file") as string) || file.name,
-        cartella: form.get("cartella"),
+        cartella: form.get("cartella") || activeFolder === "Tutti" ? "Altro" : activeFolder,
         file_url: urlData.publicUrl,
       });
       if (error) throw error;
       event.currentTarget.reset();
+      setShowUpload(false);
       await reload();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Errore nel caricamento del file.");
+      setFormError(err instanceof Error ? err.message : "Errore nel caricamento del file.");
     } finally {
       setUploading(false);
     }
@@ -1315,59 +1379,128 @@ function Vault({
 
   return (
     <>
-      <ModuleHeader title="Vault" text="Documenti, contratti e asset organizzati per cartelle." icon={Archive} />
-      <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
-        <div className="glass rounded-md p-5">
-          {files.length === 0 ? (
-            <p className="py-12 text-center text-sm text-white/35">Nessun documento. Carica il primo con il form a destra.</p>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {files.map((file) => (
-                <article key={file.id} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200">{file.cartella}</p>
-                  <h3 className="mt-2 font-black text-white">{file.nome_file}</h3>
-                  <div className="mt-5 flex gap-2">
-                    <a
-                      href={file.file_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-white/8 px-3 py-2 text-xs font-bold text-white hover:bg-white/12"
-                    >
-                      <Download size={15} />
-                      Apri
-                    </a>
-                    {user.role === "master" ? (
-                      <button
-                        onClick={() => deleteFile(file)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
+      <ModuleHeader
+        title="Vault"
+        text="Documenti, contratti, rider e asset organizzati per cartella."
+        icon={Archive}
+        actions={
+          <button
+            onClick={() => setShowUpload(!showUpload)}
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2.5 text-xs font-black text-black transition hover:bg-orange-300"
+          >
+            <UploadCloud size={15} />
+            Carica file
+          </button>
+        }
+      />
+
+      {/* Upload form */}
+      {showUpload && (
+        <form onSubmit={uploadFile} className="glass mb-5 rounded-md p-5">
+          <p className="mb-4 font-black text-white">Carica nuovo documento</p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Input name="nome_file" label="Nome file (opzionale)" />
+            <Select name="cartella" label="Cartella" options={["Press", "Live", "Amministrazione", "Altro"]} />
+            <label className="mt-4 block">
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File</span>
+              <input type="file" required className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
+            </label>
+          </div>
+          <FormError text={formError} />
+          <div className="mt-4 flex gap-3">
+            <button
+              type="submit"
+              disabled={uploading}
+              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-5 py-2.5 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
+            >
+              {uploading ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+              Carica
+            </button>
+            <button type="button" onClick={() => setShowUpload(false)} className="rounded-md border border-white/15 px-4 py-2.5 text-sm text-white/55 hover:text-white">
+              Annulla
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-[200px_1fr]">
+        {/* Left: folder nav */}
+        <div className="glass h-fit rounded-md p-4">
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-white/30">Cartelle</p>
+          {VAULT_FOLDERS.map((folder) => (
+            <button
+              key={folder}
+              onClick={() => setActiveFolder(folder)}
+              className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
+                activeFolder === folder
+                  ? "bg-orange-500/15 font-bold text-orange-200"
+                  : "text-white/50 hover:bg-white/[0.04] hover:text-white"
+              }`}
+            >
+              <span>{folder}</span>
+              <span className="font-mono text-xs opacity-60">{folderCount(folder)}</span>
+            </button>
+          ))}
         </div>
 
-        <form onSubmit={uploadFile} className="glass rounded-md p-5">
-          <p className="text-lg font-black text-white">Carica documento</p>
-          <p className="mt-1 text-sm text-white/50">Upload su Supabase Storage bucket &ldquo;vault&rdquo;.</p>
-          <Input name="nome_file" label="Nome file (opzionale)" />
-          <Select name="cartella" label="Cartella" options={["Press", "Live", "Amministrazione", "Altro"]} />
-          <label className="mt-4 block">
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">File</span>
-            <input type="file" required className="field mt-2 rounded-md px-3 py-2.5 text-sm" />
-          </label>
-          <button
-            disabled={uploading}
-            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:opacity-60"
-          >
-            {uploading ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
-            Carica
-          </button>
-        </form>
+        {/* Right: file table */}
+        <div className="glass rounded-md overflow-hidden">
+          {filtered.length === 0 ? (
+            <div className="py-16 text-center">
+              <Archive size={36} className="mx-auto mb-4 text-white/15" />
+              <p className="text-sm text-white/35">
+                {activeFolder === "Tutti" ? "Nessun file nel vault." : `Nessun file nella cartella "${activeFolder}".`}
+              </p>
+              <p className="mt-1 text-xs text-white/22">Usa &ldquo;Carica file&rdquo; in alto per aggiungere documenti.</p>
+            </div>
+          ) : (
+            <table className="w-full border-collapse text-left text-sm">
+              <thead className="text-[10px] uppercase tracking-widest text-white/30">
+                <tr>
+                  <th className="border-b border-white/8 px-5 py-3">Nome file</th>
+                  <th className="border-b border-white/8 px-5 py-3">Cartella</th>
+                  <th className="border-b border-white/8 px-5 py-3">Data</th>
+                  <th className="border-b border-white/8 px-5 py-3 text-right">Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((file) => (
+                  <tr key={file.id} className="border-b border-white/[0.06] hover:bg-white/[0.025]">
+                    <td className="px-5 py-3.5 font-bold text-white">{file.nome_file}</td>
+                    <td className="px-5 py-3.5">
+                      <span className="rounded border border-orange-400/20 px-2 py-0.5 text-xs font-mono text-orange-200">
+                        {file.cartella || "—"}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 font-mono text-xs text-white/40">
+                      {file.created_at ? new Date(file.created_at).toLocaleDateString("it-IT") : "—"}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center justify-end gap-2">
+                        <a
+                          href={file.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-md border border-white/12 bg-white/[0.05] px-3 py-1.5 text-xs font-bold text-white hover:bg-white/10"
+                        >
+                          <Download size={13} />
+                          Apri
+                        </a>
+                        <button
+                          onClick={() => deleteFile(file)}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-400/25 text-red-300 hover:bg-red-500/10"
+                          title="Elimina"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </>
   );
