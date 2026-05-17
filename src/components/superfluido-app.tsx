@@ -13,6 +13,7 @@ import {
   Download,
   ExternalLink,
   FileAudio,
+  KeyRound,
   FolderOpen,
   FolderPlus,
   Home,
@@ -338,19 +339,7 @@ export function SuperfluidoApp() {
             ))}
           </nav>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden text-right sm:block">
-              <p className="text-xs font-semibold text-white">{user.email}</p>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-orange-300">{user.role}</p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/[0.045] text-white/70 transition hover:border-orange-400/50 hover:text-orange-200"
-              title="Esci"
-            >
-              <LogOut size={18} />
-            </button>
-          </div>
+          <UserMenu user={user} onLogout={handleLogout} onPasswordReset={handleResetPassword} />
         </div>
 
         <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 pb-3 xl:hidden">
@@ -407,6 +396,72 @@ export function SuperfluidoApp() {
         </div>
       </section>
     </main>
+  );
+}
+
+// ─── UserMenu (avatar dropdown) ──────────────────────────────────────────────
+
+function UserMenu({
+  user,
+  onLogout,
+  onPasswordReset,
+}: {
+  user: AppUser;
+  onLogout: () => void;
+  onPasswordReset: (email: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+
+  const initial = user.email[0].toUpperCase();
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-500/40 bg-orange-500/15 text-sm font-black text-orange-300 transition hover:border-orange-400 hover:bg-orange-500/25"
+        title={user.email}
+      >
+        {initial}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-11 z-50 w-60 overflow-hidden rounded-md border border-white/10 bg-[#0f0f0f] shadow-2xl">
+          <div className="border-b border-white/10 px-4 py-3">
+            <p className="truncate text-xs font-semibold text-white">{user.email}</p>
+            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-orange-300">{user.role}</p>
+          </div>
+          <div className="p-1.5">
+            <button
+              onClick={async () => {
+                setOpen(false);
+                await onPasswordReset(user.email);
+              }}
+              className="flex w-full items-center gap-2.5 rounded px-3 py-2 text-sm text-white/70 transition hover:bg-white/[0.06] hover:text-white"
+            >
+              <KeyRound size={13} /> Cambia password
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false);
+                onLogout();
+              }}
+              className="flex w-full items-center gap-2.5 rounded px-3 py-2 text-sm text-white/70 transition hover:bg-red-500/10 hover:text-red-300"
+            >
+              <LogOut size={13} /> Esci
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2733,6 +2788,7 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     loadItems();
@@ -2814,19 +2870,33 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
   }
 
   const isFolder = (mimeType: string) => mimeType === "application/vnd.google-apps.folder";
+  const displayItems = search.trim()
+    ? items.filter((i) => i.name.toLowerCase().includes(search.toLowerCase()))
+    : items;
 
   return (
     <div className="space-y-4">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-white/50">
-        {breadcrumb.map((item, idx) => (
-          <div key={idx} className="flex items-center gap-2">
-            {idx > 0 && <span>/</span>}
-            <button onClick={() => (item.id === null ? goHome() : navigate(item.id, item.name))} className="text-white hover:text-orange-300">
-              {item.name}
-            </button>
-          </div>
-        ))}
+      {/* Breadcrumb + search */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm text-white/50">
+          {breadcrumb.map((item, idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              {idx > 0 && <span>/</span>}
+              <button onClick={() => (item.id === null ? goHome() : navigate(item.id, item.name))} className="text-white hover:text-orange-300">
+                {item.name}
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+          <input
+            className="field w-56 rounded-md py-2 pl-8 pr-3 text-sm"
+            placeholder="Cerca file..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       </div>
 
       {/* Create folder form */}
@@ -2848,11 +2918,13 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
       <div className="glass rounded-md p-5">
         {loading ? (
           <p className="py-10 text-center text-sm text-white/40">Caricamento...</p>
-        ) : items.length === 0 ? (
-          <p className="py-10 text-center text-sm text-white/40">Cartella vuota</p>
+        ) : displayItems.length === 0 ? (
+          <p className="py-10 text-center text-sm text-white/40">
+            {search.trim() ? `Nessun risultato per "${search}"` : "Cartella vuota"}
+          </p>
         ) : (
           <div className="space-y-2">
-            {items.map((item) => (
+            {displayItems.map((item) => (
               <div key={item.id} className="glass flex items-center justify-between rounded-md p-3">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                   {isFolder(item.mimeType) ? <FolderOpen size={16} className="shrink-0 text-orange-300" /> : <FileAudio size={16} className="shrink-0 text-white/40" />}
