@@ -559,6 +559,94 @@ function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo:
         <Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" />
         <Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" />
       </section>
+
+      {/* Widget task board */}
+      <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
+        {/* Task da fare */}
+        <div className="glass rounded-md p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ClipboardList size={16} className="text-orange-300" />
+              <p className="font-black text-white">Task Board</p>
+            </div>
+            <button onClick={() => goTo("kanban")} className="text-xs font-semibold text-orange-300 hover:text-orange-200 transition">
+              Vedi tutto →
+            </button>
+          </div>
+          {/* Contatori per stato */}
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            {(["Da Fare", "In Corso", "Completato"] as const).map((stato) => {
+              const count = state.tasks.filter((t) => t.stato === stato).length;
+              const dotCls = stato === "Da Fare" ? "bg-white/30" : stato === "In Corso" ? "bg-orange-400" : "bg-emerald-400";
+              return (
+                <div key={stato} className="rounded-md border border-white/8 bg-white/[0.025] p-3 text-center">
+                  <p className="font-mono text-2xl font-black text-white">{count}</p>
+                  <div className="mt-1 flex items-center justify-center gap-1.5">
+                    <span className={`h-1.5 w-1.5 rounded-full ${dotCls}`} />
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-white/40">{stato}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* Primi 4 task pendenti */}
+          {state.tasks.filter((t) => t.stato !== "Completato").length === 0 ? (
+            <p className="py-3 text-center text-sm text-white/30">Nessun task in sospeso.</p>
+          ) : (
+            <div className="space-y-2">
+              {state.tasks
+                .filter((t) => t.stato !== "Completato")
+                .slice(0, 4)
+                .map((task) => {
+                  const isInCorso = task.stato === "In Corso";
+                  return (
+                    <div key={task.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${isInCorso ? "bg-orange-400" : "bg-white/25"}`} />
+                      <p className="flex-1 truncate text-sm font-semibold text-white/80">{task.titolo}</p>
+                      {task.scadenza && (
+                        <p className="shrink-0 font-mono text-[10px] text-white/35">
+                          {new Date(task.scadenza).toLocaleDateString("it-IT")}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+
+        {/* Prossimi eventi */}
+        <div className="glass rounded-md p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarDays size={16} className="text-orange-300" />
+              <p className="font-black text-white">Prossimi eventi</p>
+            </div>
+            <button onClick={() => goTo("calendar")} className="text-xs font-semibold text-orange-300 hover:text-orange-200 transition">
+              Vedi tutto →
+            </button>
+          </div>
+          {state.events.length === 0 ? (
+            <p className="py-3 text-center text-sm text-white/30">Nessun evento in calendario.</p>
+          ) : (
+            <div className="space-y-2">
+              {[...state.events]
+                .filter((e) => new Date(e.data_evento) >= new Date())
+                .sort((a, b) => new Date(a.data_evento).getTime() - new Date(b.data_evento).getTime())
+                .slice(0, 4)
+                .map((ev) => (
+                  <div key={ev.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ev.colore ?? "#f97316" }} />
+                    <p className="flex-1 truncate text-sm font-semibold text-white/80">{ev.titolo}</p>
+                    <p className="shrink-0 font-mono text-[10px] text-white/35">
+                      {new Date(ev.data_evento).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      </section>
     </>
   );
 }
@@ -1974,6 +2062,7 @@ function KanbanBoard({
   onToast: (text: string, kind?: "error" | "success") => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
 
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1991,6 +2080,7 @@ function KanbanBoard({
       if (error) { onToast(`Errore task: ${error.message}`); return; }
       onToast("Task aggiunto.", "success");
       (event.target as HTMLFormElement).reset();
+      setShowForm(false);
       await reload();
     } finally {
       setSaving(false);
@@ -2026,41 +2116,66 @@ function KanbanBoard({
 
   return (
     <>
-      <ModuleHeader title="Task Board" text="Kanban del collettivo — Da Fare, In Corso, Completato." icon={ClipboardList} />
+      <ModuleHeader
+        title="Task Board"
+        text="Kanban del collettivo — Da Fare, In Corso, Completato."
+        icon={ClipboardList}
+        actions={
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-black text-black transition hover:bg-orange-300"
+          >
+            <Plus size={15} />
+            Nuovo task
+          </button>
+        }
+      />
 
-      <form onSubmit={createTask} className="glass mb-6 rounded-md p-5">
-        <p className="mb-4 font-black text-white">Nuovo task</p>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Input name="titolo" label="Titolo" placeholder="Es. Mixare Traccia 3" required />
-          <Select name="stato" label="Stato iniziale" options={[...KANBAN_STATI]} />
-          <Input name="scadenza" label="Scadenza (opzionale)" type="date" />
-        </div>
-        <ActionButton icon={Plus} text="Aggiungi task" loading={saving} />
-      </form>
+      {showForm && (
+        <form onSubmit={createTask} className="glass mb-6 rounded-md p-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Input name="titolo" label="Titolo" placeholder="Es. Mixare Traccia 3" required />
+            <Select name="stato" label="Stato iniziale" options={[...KANBAN_STATI]} />
+            <Input name="scadenza" label="Scadenza (opzionale)" type="date" />
+          </div>
+          <div className="mt-4 flex gap-3">
+            <ActionButton icon={Plus} text="Aggiungi task" loading={saving} />
+            <button type="button" onClick={() => setShowForm(false)} className="mt-5 inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-3 text-sm font-bold text-white/60 hover:text-white">
+              Annulla
+            </button>
+          </div>
+        </form>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {KANBAN_STATI.map((stato) => {
           const col = tasks.filter((t) => t.stato === stato);
           return (
-            <div key={stato} className={`rounded-md border p-4 ${colColors[stato]}`}>
+            <div key={stato} className={`flex min-h-[460px] flex-col rounded-md border p-4 ${colColors[stato]}`}>
               <div className="mb-4 flex items-center gap-2">
                 <span className={`h-2 w-2 rounded-full ${dotColors[stato]}`} />
                 <p className="text-xs font-bold uppercase tracking-widest text-white/55">{stato}</p>
-                <span className="ml-auto font-mono text-xs text-white/30">{col.length}</span>
+                <span className="ml-auto font-mono text-sm font-black text-white/40">{col.length}</span>
               </div>
-              <div className="space-y-3">
-                {col.length === 0 && <p className="py-6 text-center text-xs text-white/20">Nessun task</p>}
+              <div className="flex-1 space-y-3">
+                {col.length === 0 && (
+                  <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-white/10">
+                    <ClipboardList size={20} className="text-white/15" />
+                    <p className="text-xs text-white/20">Nessun task</p>
+                  </div>
+                )}
                 {col.map((task) => {
                   const stIdx = KANBAN_STATI.indexOf(task.stato as KanbanStato);
                   return (
                     <div key={task.id} className="glass rounded-md p-3">
                       <p className="text-sm font-bold text-white">{task.titolo}</p>
+                      {task.descrizione && <p className="mt-1 text-xs leading-5 text-white/50">{task.descrizione}</p>}
                       {task.scadenza && (
-                        <p className="mt-1 font-mono text-[10px] text-white/35">
-                          Scadenza: {new Date(task.scadenza).toLocaleDateString("it-IT")}
+                        <p className="mt-1.5 font-mono text-[10px] text-white/35">
+                          ⏱ {new Date(task.scadenza).toLocaleDateString("it-IT")}
                         </p>
                       )}
-                      {task.assegnato_a && <p className="mt-0.5 text-[10px] text-white/30">{task.assegnato_a}</p>}
+                      {task.assegnato_a && <p className="mt-0.5 truncate text-[10px] text-white/25">{task.assegnato_a}</p>}
                       <div className="mt-3 flex items-center justify-between gap-1">
                         <div className="flex gap-1">
                           <button
