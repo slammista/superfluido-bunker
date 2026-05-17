@@ -12,6 +12,8 @@ export type Product = {
   category: string | null;
   base_price_sell: number | null;
   base_price_cost: number | null;
+  image_url?: string | null;
+  description?: string | null;
   product_variants?: ProductVariant[];
 };
 
@@ -39,6 +41,9 @@ export type Track = {
   nome_traccia: string;
   fase: string | null;
   audio_file_url?: string | null;
+  nota?: string | null;
+  bpm?: number | null;
+  tonalita?: string | null;
   album_progetti?: { id: string | number; nome_album: string } | null;
 };
 
@@ -59,5 +64,22 @@ export type VaultFile = {
   nome_file: string;
   cartella: string;
   file_url: string;
+  created_at?: string;
+};
+
+export type VaultFolder = {
+  id: string | number;
+  nome: string;
+  creato_da?: string;
+  created_at?: string;
+};
+
+export type KanbanTask = {
+  id: string | number;
+  titolo: string;
+  descrizione?: string | null;
+  assegnato_a?: string | null;
+  stato: string;
+  scadenza?: string | null;
   created_at?: string;
 };
