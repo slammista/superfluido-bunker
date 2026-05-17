@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Disc3,
   Download,
+  ExternalLink,
   FileAudio,
   FolderOpen,
   FolderPlus,
@@ -25,6 +26,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Radio,
   Save,
   Search,
   Send,
@@ -41,7 +43,7 @@ import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
 
-type View = "home" | "inventory" | "calendar" | "projects" | "press" | "profile" | "vault";
+type View = "home" | "inventory" | "calendar" | "projects" | "distrib" | "press" | "profile" | "vault";
 
 type AppUser = {
   id: string;
@@ -68,6 +70,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "inventory", label: "Magazzino", icon: Package },
   { id: "calendar", label: "Calendario", icon: CalendarDays },
   { id: "projects", label: "Studio Hub", icon: Disc3 },
+  { id: "distrib", label: "Distrib", icon: Radio },
   { id: "press", label: "AI Press Kit", icon: Bot },
   { id: "profile", label: "Profili", icon: UserRound },
   { id: "vault", label: "Vault", icon: FolderOpen },
@@ -388,6 +391,9 @@ export function SuperfluidoApp() {
         </div>
         <div className={view === "projects" ? "" : "hidden"}>
           <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
+        </div>
+        <div className={view === "distrib" ? "" : "hidden"}>
+          <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "press" ? "" : "hidden"}>
           {/* FIX 5: passa user e onToast a PressKit */}
@@ -1974,6 +1980,343 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Distrib ─────────────────────────────────────────────────────────────────
+
+type DistribTab = "released" | "upcoming" | "in_progress";
+
+function Distrib({
+  albums,
+  user,
+  reload,
+  onToast,
+}: {
+  albums: Album[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onToast: (msg: string, kind?: "error" | "success") => void;
+}) {
+  const [tab, setTab] = useState<DistribTab>("released");
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [spotifyUrl, setSpotifyUrl] = useState("");
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [form, setForm] = useState({
+    nome_album: "",
+    release_date: "",
+    stato: "in_progress",
+    link_spotify: "",
+    link_apple: "",
+    link_bandcamp: "",
+    spotify_album_id: "",
+    spotify_cover_url: "",
+  });
+
+  async function autoFillFromSpotify() {
+    if (!spotifyUrl.trim()) return;
+    setAutoFilling(true);
+    try {
+      const res = await fetch("/api/spotify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "album", url: spotifyUrl }),
+      });
+      const data = (await res.json()) as { album?: Partial<typeof form>; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Errore Spotify");
+      if (data.album) {
+        setForm((prev) => ({
+          ...prev,
+          nome_album: (data.album!.nome_album as string) ?? prev.nome_album,
+          release_date: (data.album!.release_date as string) ?? prev.release_date,
+          link_spotify: (data.album!.link_spotify as string) ?? prev.link_spotify,
+          spotify_album_id: (data.album!.spotify_album_id as string) ?? prev.spotify_album_id,
+          spotify_cover_url: (data.album!.spotify_cover_url as string) ?? prev.spotify_cover_url,
+        }));
+      }
+      onToast("Dati importati da Spotify.", "success");
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : "Errore");
+    } finally {
+      setAutoFilling(false);
+    }
+  }
+
+  async function saveRelease(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!form.nome_album.trim()) { onToast("Il nome è obbligatorio."); return; }
+    setSaving(true);
+    try {
+      const { error } = await getSupabase().from("album_progetti").insert({
+        creato_da: user.id,
+        nome_album: form.nome_album.trim(),
+        release_date: form.release_date || null,
+        stato: form.stato,
+        link_spotify: form.link_spotify || null,
+        link_apple: form.link_apple || null,
+        link_bandcamp: form.link_bandcamp || null,
+        spotify_album_id: form.spotify_album_id || null,
+        cover_image_url: form.spotify_cover_url || null,
+      });
+      if (error) throw error;
+      onToast("Release aggiunta.", "success");
+      await reload();
+      setShowForm(false);
+      setSpotifyUrl("");
+      setForm({ nome_album: "", release_date: "", stato: "in_progress", link_spotify: "", link_apple: "", link_bandcamp: "", spotify_album_id: "", spotify_cover_url: "" });
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Errore");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteRelease(id: string | number) {
+    const { error } = await getSupabase().from("album_progetti").delete().eq("id", id);
+    if (error) { onToast(`Errore: ${error.message}`); return; }
+    onToast("Release rimossa.", "success");
+    await reload();
+  }
+
+  async function updateStato(id: string | number, stato: string) {
+    const { error } = await getSupabase().from("album_progetti").update({ stato }).eq("id", id);
+    if (error) { onToast(`Errore: ${error.message}`); return; }
+    await reload();
+  }
+
+  const TABS: { id: DistribTab; label: string }[] = [
+    { id: "released", label: "Usciti" },
+    { id: "upcoming", label: "In Arrivo" },
+    { id: "in_progress", label: "In Lavorazione" },
+  ];
+
+  const tabAlbums = albums.filter((a) => (a.stato ?? "in_progress") === tab);
+
+  return (
+    <>
+      <ModuleHeader title="Distrib" text="Gestione release: uscite, in arrivo e in lavorazione." icon={Radio} />
+
+      {/* Tabs + add button */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-1 rounded-md border border-white/10 bg-white/[0.035] p-1">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`rounded px-4 py-1.5 text-sm font-semibold transition ${tab === t.id ? "bg-orange-500 text-white" : "text-white/50 hover:text-white"}`}
+            >
+              {t.label}
+              <span className="ml-1.5 text-xs opacity-60">
+                ({albums.filter((a) => (a.stato ?? "in_progress") === t.id).length})
+              </span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400"
+        >
+          <Plus size={16} /> Aggiungi release
+        </button>
+      </div>
+
+      {/* Form */}
+      {showForm && (
+        <div className="glass mb-6 rounded-md p-5">
+          <p className="mb-4 text-sm font-bold text-white">Nuova release</p>
+
+          {/* Spotify auto-fill */}
+          <div className="mb-4 flex gap-2">
+            <input
+              className="field flex-1 rounded-md px-3 py-2 text-sm"
+              placeholder="Incolla URL album Spotify per auto-compilare..."
+              value={spotifyUrl}
+              onChange={(e) => setSpotifyUrl(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={autoFillFromSpotify}
+              disabled={autoFilling || !spotifyUrl.trim()}
+              className="inline-flex items-center gap-2 rounded-md border border-orange-500/50 px-3 py-2 text-sm font-semibold text-orange-300 transition hover:bg-orange-500/10 disabled:opacity-40"
+            >
+              {autoFilling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Auto-compila
+            </button>
+          </div>
+
+          <form onSubmit={saveRelease} className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <input
+                className="field w-full rounded-md px-3 py-2 text-sm"
+                placeholder="Nome album / EP / singolo *"
+                required
+                value={form.nome_album}
+                onChange={(e) => setForm((p) => ({ ...p, nome_album: e.target.value }))}
+              />
+            </div>
+            <input
+              className="field rounded-md px-3 py-2 text-sm"
+              type="date"
+              title="Data uscita"
+              value={form.release_date}
+              onChange={(e) => setForm((p) => ({ ...p, release_date: e.target.value }))}
+            />
+            <select
+              className="field rounded-md px-3 py-2 text-sm"
+              value={form.stato}
+              onChange={(e) => setForm((p) => ({ ...p, stato: e.target.value }))}
+            >
+              <option value="in_progress">In Lavorazione</option>
+              <option value="upcoming">In Arrivo</option>
+              <option value="released">Uscito</option>
+            </select>
+            <input
+              className="field rounded-md px-3 py-2 text-sm"
+              placeholder="Link Spotify"
+              value={form.link_spotify}
+              onChange={(e) => setForm((p) => ({ ...p, link_spotify: e.target.value }))}
+            />
+            <input
+              className="field rounded-md px-3 py-2 text-sm"
+              placeholder="Link Apple Music"
+              value={form.link_apple}
+              onChange={(e) => setForm((p) => ({ ...p, link_apple: e.target.value }))}
+            />
+            <input
+              className="field rounded-md px-3 py-2 text-sm sm:col-span-2"
+              placeholder="Link Bandcamp"
+              value={form.link_bandcamp}
+              onChange={(e) => setForm((p) => ({ ...p, link_bandcamp: e.target.value }))}
+            />
+            {form.spotify_cover_url && (
+              <div className="sm:col-span-2 flex items-center gap-3">
+                <Image src={form.spotify_cover_url} alt="" width={56} height={56} className="rounded-md object-cover" />
+                <p className="text-xs text-white/50">Cover importata da Spotify</p>
+              </div>
+            )}
+            <div className="sm:col-span-2 flex gap-3">
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400 disabled:opacity-40"
+              >
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salva
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="rounded-md border border-white/10 px-4 py-2 text-sm text-white/60 hover:text-white"
+              >
+                Annulla
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Release grid */}
+      {tabAlbums.length === 0 ? (
+        <div className="py-20 text-center text-white/30">
+          <Radio size={40} className="mx-auto mb-3 opacity-30" />
+          <p className="text-lg font-black">Nessuna release</p>
+          <p className="mt-1 text-sm">Aggiungi la prima con il pulsante in alto</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {tabAlbums.map((album) => {
+            const cover = album.cover_image_url;
+            return (
+              <article key={album.id} className="glass group overflow-hidden rounded-md">
+                {/* Cover */}
+                <div className="relative h-44 w-full bg-white/[0.04]">
+                  {cover ? (
+                    <Image src={cover} alt={album.nome_album} fill className="object-cover" unoptimized />
+                  ) : (
+                    <div
+                      className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumGradient(album.id)}`}
+                    >
+                      <Music size={40} className="text-white/30" />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                  <div className="absolute bottom-3 left-3 right-3">
+                    <p className="font-black leading-tight text-white">{album.nome_album}</p>
+                    {album.release_date && (
+                      <p className="mt-0.5 text-xs text-white/60">
+                        {new Date(album.release_date).toLocaleDateString("it-IT", {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        })}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Links + stato */}
+                <div className="p-4">
+                  <div className="flex flex-wrap gap-2">
+                    {album.link_spotify && (
+                      <a
+                        href={album.link_spotify}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20"
+                      >
+                        <ExternalLink size={10} /> Spotify
+                      </a>
+                    )}
+                    {album.link_apple && (
+                      <a
+                        href={album.link_apple}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-xs font-semibold text-pink-300 transition hover:bg-pink-500/20"
+                      >
+                        <ExternalLink size={10} /> Apple Music
+                      </a>
+                    )}
+                    {album.link_bandcamp && (
+                      <a
+                        href={album.link_bandcamp}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20"
+                      >
+                        <ExternalLink size={10} /> Bandcamp
+                      </a>
+                    )}
+                    {!album.link_spotify && !album.link_apple && !album.link_bandcamp && (
+                      <span className="text-xs text-white/30">Nessun link aggiunto</span>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <select
+                      value={album.stato ?? "in_progress"}
+                      onChange={(e) => updateStato(album.id, e.target.value)}
+                      className="field rounded px-2 py-1 text-xs"
+                    >
+                      <option value="in_progress">In Lavorazione</option>
+                      <option value="upcoming">In Arrivo</option>
+                      <option value="released">Uscito</option>
+                    </select>
+                    <button
+                      onClick={() => deleteRelease(album.id)}
+                      className="rounded p-1 text-white/30 transition hover:text-red-400"
+                      title="Elimina"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
     </>

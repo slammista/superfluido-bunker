@@ -33,6 +33,13 @@ export type Album = {
   id: string | number;
   nome_album: string;
   cover_image_url?: string | null;
+  release_date?: string | null;
+  stato?: string | null;
+  link_spotify?: string | null;
+  link_apple?: string | null;
+  link_bandcamp?: string | null;
+  spotify_album_id?: string | null;
+  spotify_cover_url?: string | null;
 };
 
 export type Track = {

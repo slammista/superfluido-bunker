@@ -138,11 +138,20 @@ CREATE POLICY "auth_all" ON tasks_kanban      FOR ALL TO authenticated USING (tr
 -- Da eseguire nel SQL Editor Supabase dopo aver rieseguito tutto lo schema
 -- =========================================================
 
-ALTER TABLE products     ADD COLUMN IF NOT EXISTS image_url   text;
-ALTER TABLE products     ADD COLUMN IF NOT EXISTS description  text;
-ALTER TABLE tracce_audio ADD COLUMN IF NOT EXISTS nota         text;
-ALTER TABLE tracce_audio ADD COLUMN IF NOT EXISTS bpm          integer;
-ALTER TABLE tracce_audio ADD COLUMN IF NOT EXISTS tonalita     text;
+ALTER TABLE products       ADD COLUMN IF NOT EXISTS image_url         text;
+ALTER TABLE products       ADD COLUMN IF NOT EXISTS description        text;
+ALTER TABLE tracce_audio   ADD COLUMN IF NOT EXISTS nota               text;
+ALTER TABLE tracce_audio   ADD COLUMN IF NOT EXISTS bpm                integer;
+ALTER TABLE tracce_audio   ADD COLUMN IF NOT EXISTS tonalita           text;
+
+-- Colonne Distrib (release management + Spotify)
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS release_date       date;
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS stato              text DEFAULT 'in_progress';
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS link_spotify       text;
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS link_apple         text;
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS link_bandcamp      text;
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS spotify_album_id   text;
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS spotify_cover_url  text;
 
 -- =========================================================
 -- STORAGE BUCKET
