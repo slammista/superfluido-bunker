@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   Music,
   Package,
+  Pause,
   Pencil,
   Play,
   Plus,
@@ -34,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
@@ -108,6 +109,7 @@ export function SuperfluidoApp() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   function showToast(text: string, kind: "error" | "success" = "error") {
     setToast({ text, kind });
@@ -149,12 +151,17 @@ export function SuperfluidoApp() {
 
     // FIX 1: onAuthStateChange listener
     const supabase = getSupabase();
-    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") {
         if (mounted) {
           setUser(null);
           setState(emptyState);
           setView("home");
+          setPasswordRecovery(false);
+        }
+      } else if (event === "PASSWORD_RECOVERY") {
+        if (mounted && session?.user) {
+          setPasswordRecovery(true);
         }
       }
     });
@@ -264,9 +271,43 @@ export function SuperfluidoApp() {
     }
   }
 
+  async function handleResetPassword(email: string) {
+    setLoading(true);
+    setNotice(null);
+    try {
+      const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
+        redirectTo: typeof window !== "undefined" ? window.location.origin : "",
+      });
+      if (error) throw error;
+      setNotice("Email inviata! Controlla la tua casella e clicca il link.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Errore nell'invio dell'email.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSetNewPassword(newPassword: string) {
+    setLoading(true);
+    setNotice(null);
+    try {
+      const { error } = await getSupabase().auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setPasswordRecovery(false);
+      setNotice("Password aggiornata! Effettua il login.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Errore aggiornamento password.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (passwordRecovery) {
+    return <PasswordRecoveryScreen loading={loading} notice={notice} onSetNewPassword={handleSetNewPassword} />;
+  }
+
   if (!user) {
-    // FIX 2: passa onSignup a LoginScreen
-    return <LoginScreen loading={loading} notice={notice} onLogin={handleLogin} onSignup={handleSignup} />;
+    return <LoginScreen loading={loading} notice={notice} onLogin={handleLogin} onSignup={handleSignup} onResetPassword={handleResetPassword} />;
   }
 
   return (
@@ -368,22 +409,26 @@ function LoginScreen({
   notice,
   onLogin,
   onSignup,
+  onResetPassword,
 }: {
   loading: boolean;
   notice: string | null;
   onLogin: (email: string, password: string) => Promise<void>;
   onSignup: (email: string, password: string) => Promise<void>;
+  onResetPassword: (email: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (mode === "login") {
       await onLogin(email, password);
-    } else {
+    } else if (mode === "signup") {
       await onSignup(email, password);
+    } else {
+      await onResetPassword(email);
     }
   }
 
@@ -397,49 +442,111 @@ function LoginScreen({
           <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-full w-full object-contain" priority />
         </div>
         <h1 className="text-center text-2xl font-black tracking-tight text-white">
-          {mode === "login" ? "Bunker Login" : "Crea Account"}
+          {mode === "login" ? "Bunker Login" : mode === "signup" ? "Crea Account" : "Reset Password"}
         </h1>
         <p className="mt-2 text-center text-sm text-white/55">
           {mode === "login"
             ? "Accesso operativo a magazzino, studio, calendario e AI press kit."
-            : "Crea il tuo account per accedere al Bunker."}
+            : mode === "signup"
+            ? "Crea il tuo account per accedere al Bunker."
+            : "Inserisci la tua email e ti mandiamo il link per reimpostare la password."}
         </p>
 
         {notice ? <Notice text={notice} /> : null}
 
         <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" />
+        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" type="email" required />
 
-        <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" />
+        {mode !== "reset" && (
+          <>
+            <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
+            <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
+          </>
+        )}
 
         <button
           disabled={loading}
           className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
-          {mode === "login" ? "Entra" : "Crea Account"}
+          {mode === "login" ? "Entra" : mode === "signup" ? "Crea Account" : "Invia link di reset"}
         </button>
 
-        <div className="mt-5 text-center">
-          {mode === "login" ? (
-            <button
-              type="button"
-              onClick={() => setMode("signup")}
-              className="text-sm text-white/50 transition hover:text-orange-300"
-            >
-              Non hai un account? <span className="font-bold text-orange-400">Registrati</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setMode("login")}
-              className="text-sm text-white/50 transition hover:text-orange-300"
-            >
+        <div className="mt-5 flex flex-col items-center gap-2 text-center">
+          {mode === "login" && (
+            <>
+              <button type="button" onClick={() => setMode("signup")} className="text-sm text-white/50 transition hover:text-orange-300">
+                Non hai un account? <span className="font-bold text-orange-400">Registrati</span>
+              </button>
+              <button type="button" onClick={() => setMode("reset")} className="text-xs text-white/30 transition hover:text-white/60">
+                Password dimenticata?
+              </button>
+            </>
+          )}
+          {mode === "signup" && (
+            <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
               Hai già un account? <span className="font-bold text-orange-400">Accedi</span>
             </button>
           )}
+          {mode === "reset" && (
+            <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
+              ← Torna al login
+            </button>
+          )}
         </div>
+      </form>
+    </main>
+  );
+}
+
+function PasswordRecoveryScreen({
+  loading,
+  notice,
+  onSetNewPassword,
+}: {
+  loading: boolean;
+  notice: string | null;
+  onSetNewPassword: (password: string) => Promise<void>;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (password.length < 6) { setLocalError("La password deve essere almeno 6 caratteri."); return; }
+    if (password !== confirm) { setLocalError("Le password non coincidono."); return; }
+    setLocalError(null);
+    await onSetNewPassword(password);
+  }
+
+  return (
+    <main className="grid min-h-screen place-items-center px-4 py-10">
+      <div className="fixed inset-0 -z-10 opacity-45">
+        <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
+      </div>
+      <form onSubmit={submit} className="glass w-full max-w-md rounded-md p-7">
+        <div className="mx-auto mb-8 h-28 w-52">
+          <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-full w-full object-contain" priority />
+        </div>
+        <h1 className="text-center text-2xl font-black tracking-tight text-white">Nuova Password</h1>
+        <p className="mt-2 text-center text-sm text-white/55">Scegli una nuova password per il tuo account.</p>
+
+        {(notice || localError) ? <Notice text={localError ?? notice ?? ""} /> : null}
+
+        <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Nuova password</label>
+        <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Minimo 6 caratteri" required />
+
+        <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Conferma password</label>
+        <input className="field mt-2 rounded-md px-4 py-3" value={confirm} onChange={(e) => setConfirm(e.target.value)} type="password" placeholder="Ripeti la password" required />
+
+        <button
+          disabled={loading}
+          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
+          Imposta nuova password
+        </button>
       </form>
     </main>
   );
@@ -1525,7 +1632,7 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
                           </p>
                         )}
                         {track.audio_file_url ? (
-                          <audio className="mt-2 h-8 w-full" controls src={track.audio_file_url} />
+                          <AudioPlayer src={track.audio_file_url} />
                         ) : (
                           <p className="mt-1 text-xs text-white/30">Audio non caricato</p>
                         )}
@@ -2239,6 +2346,81 @@ function KanbanBoard({
         })}
       </div>
     </>
+  );
+}
+
+// ── Audio player custom ──────────────────────────────────────
+
+function AudioPlayer({ src }: { src: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  function toggle() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+    } else {
+      audio.play().catch(() => {});
+      setPlaying(true);
+    }
+  }
+
+  function seek(e: React.MouseEvent<HTMLDivElement>) {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    audio.currentTime = ((e.clientX - rect.left) / rect.width) * duration;
+  }
+
+  function fmt(s: number) {
+    if (!isFinite(s) || isNaN(s)) return "0:00";
+    return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  }
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className="mt-2 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2.5">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
+        onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)}
+        onEnded={() => setPlaying(false)}
+      />
+      <button
+        type="button"
+        onClick={toggle}
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${
+          playing ? "bg-orange-500 text-black" : "border border-white/20 text-white/60 hover:border-orange-400/50 hover:text-orange-300"
+        }`}
+      >
+        {playing ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
+      </button>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div
+          onClick={seek}
+          className="relative h-1 w-full cursor-pointer rounded-full bg-white/10"
+        >
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-orange-500"
+            style={{ width: `${progress}%` }}
+          />
+          <div
+            className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-white shadow"
+            style={{ left: `calc(${progress}% - 5px)` }}
+          />
+        </div>
+      </div>
+      <p className="shrink-0 font-mono text-[11px] tabular-nums text-white/35">
+        {fmt(currentTime)} / {fmt(duration)}
+      </p>
+    </div>
   );
 }
 
