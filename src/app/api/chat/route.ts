@@ -122,7 +122,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.GOOGLE_AI_KEY;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const model = process.env.GOOGLE_AI_MODEL || "gemini-2.0-flash";
+  const model = process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash-preview-05-20";
 
   if (!apiKey) {
     return NextResponse.json(
