@@ -958,7 +958,7 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
 
 // ── AI helpers ────────────────────────────────────────────────────────────────
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = { role: "user" | "assistant"; content: string; printable?: boolean };
 
 function buildAIContext(state: AppState) {
   return {
@@ -978,7 +978,7 @@ async function sendToAI(
   messages: ChatMessage[],
   context: ReturnType<typeof buildAIContext>,
   userId: string,
-): Promise<{ text: string; actionPerformed: boolean; actionMessage?: string }> {
+): Promise<{ text: string; actionPerformed: boolean; actionMessage?: string; printable?: boolean }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1021,7 +1021,10 @@ function OverviewAIWidget({
     setAiLoading(true);
     try {
       const data = await sendToAI(nextMessages, buildAIContext(state), user.id);
-      setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.text, printable: data.printable },
+      ]);
       if (data.actionPerformed) {
         await reload();
         onToast(data.actionMessage ?? "Operazione completata.", "success");
@@ -1091,14 +1094,32 @@ function OverviewAIWidget({
                 <Sparkles size={11} className="text-orange-300" />
               </span>
             )}
-            <div
-              className={`max-w-[75%] rounded-xl px-4 py-2.5 text-sm leading-6 ${
-                msg.role === "user"
-                  ? "rounded-br-sm bg-orange-500/20 text-white"
-                  : "rounded-bl-sm bg-white/[0.06] text-white/85"
-              }`}
-            >
-              {msg.content}
+            <div className="flex max-w-[75%] flex-col gap-1.5">
+              <div
+                className={`rounded-xl px-4 py-2.5 text-sm leading-6 whitespace-pre-wrap ${
+                  msg.role === "user"
+                    ? "rounded-br-sm bg-orange-500/20 text-white"
+                    : "rounded-bl-sm bg-white/[0.06] text-white/85"
+                }`}
+              >
+                {msg.content}
+              </div>
+              {msg.printable && (
+                <button
+                  onClick={() => {
+                    const w = window.open("", "_blank");
+                    if (w) {
+                      w.document.write(`<html><head><title>Documento</title><style>body{font-family:sans-serif;max-width:700px;margin:40px auto;line-height:1.6}h1,h2,h3{margin-top:1.5em}pre{background:#f5f5f5;padding:12px;border-radius:4px}</style></head><body><pre>${msg.content.replace(/</g, "&lt;")}</pre></body></html>`);
+                      w.document.close();
+                      w.print();
+                    }
+                  }}
+                  className="self-start rounded-md border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition hover:border-orange-400/30 hover:text-white/80"
+                >
+                  <Download size={11} className="mr-1.5 inline" />
+                  Stampa / Salva PDF
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -1186,7 +1207,10 @@ function AIChatPanel({
     setAiLoading(true);
     try {
       const data = await sendToAI(nextMessages, buildAIContext(state), user.id);
-      setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.text, printable: data.printable },
+      ]);
       if (data.actionPerformed) {
         await reload();
         onToast(data.actionMessage ?? "Operazione completata.", "success");
@@ -1203,7 +1227,7 @@ function AIChatPanel({
     "Crea un task urgente",
     "Aggiungi un live al calendario",
     "Dove sono i contratti?",
-    "Cosa abbiamo in lavorazione?",
+    "Genera un press kit rapido",
   ];
 
   return (
@@ -1215,7 +1239,7 @@ function AIChatPanel({
         <Sparkles size={15} className="text-orange-300" />
         <p className="flex-1 text-sm font-black text-white">AI Assistant</p>
         <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
-          Groq
+          Gemini
         </span>
         <button onClick={onClose} className="ml-1 text-white/35 transition hover:text-white">
           <X size={15} />
@@ -1227,7 +1251,7 @@ function AIChatPanel({
         {messages.length === 0 && (
           <div className="mt-4 space-y-3">
             <p className="text-center text-sm text-white/35">
-              Posso creare task, aggiungere eventi, cercare nel Vault e rispondere a domande sul collettivo.
+              Posso creare task, aggiungere eventi, cercare nel Vault e generare documenti.
             </p>
             <div className="mt-4 space-y-2">
               {CHIPS.map((s) => (
@@ -1244,9 +1268,9 @@ function AIChatPanel({
         )}
 
         {messages.map((msg, i) => (
-          <div key={i} className={`mb-3 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+          <div key={i} className={`mb-3 flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
             <div
-              className={`max-w-[85%] rounded-md px-3 py-2 text-sm leading-6 ${
+              className={`max-w-[85%] rounded-md px-3 py-2 text-sm leading-6 whitespace-pre-wrap ${
                 msg.role === "user"
                   ? "bg-orange-500/20 text-white"
                   : "bg-white/[0.06] text-white/85"
@@ -1254,6 +1278,22 @@ function AIChatPanel({
             >
               {msg.content}
             </div>
+            {msg.printable && (
+              <button
+                onClick={() => {
+                  const w = window.open("", "_blank");
+                  if (w) {
+                    w.document.write(`<html><head><title>Documento</title><style>body{font-family:sans-serif;max-width:700px;margin:40px auto;line-height:1.6}h1,h2,h3{margin-top:1.5em}pre{background:#f5f5f5;padding:12px;border-radius:4px}</style></head><body><pre>${msg.content.replace(/</g, "&lt;")}</pre></body></html>`);
+                    w.document.close();
+                    w.print();
+                  }
+                }}
+                className="mt-1.5 rounded-md border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-white/50 transition hover:border-orange-400/30 hover:text-white/75"
+              >
+                <Download size={10} className="mr-1 inline" />
+                Stampa / Salva PDF
+              </button>
+            )}
           </div>
         ))}
 

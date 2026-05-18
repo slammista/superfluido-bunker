@@ -1,43 +1,64 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+// Google AI — endpoint OpenAI-compatibile (nessun SDK aggiuntivo necessario)
+const AI_ENDPOINT =
+  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
-const SYSTEM_PROMPT = `Sei l'AI operativo di SUPERFLUIDO Bunker — il sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO.
+const SYSTEM_PROMPT = `Sei l'AI operativo di SUPERFLUIDO Bunker — sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO, fondato a Roma nel 2021.
+MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack | Produttori: Leony47, Giord.
 
-Collettivo fondato a Roma nel 2021.
-- MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack
-- Produttori: Leony47, Giord
+## LINGUA
+Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riempimento.
 
-Regole operative:
-- Scrivi sempre in italiano. Tono diretto, concreto, operativo.
-- Quando crei un task o un evento, conferma brevemente cosa hai fatto e i dettagli principali.
-- Per cercare nel Vault: indica solo nome file e cartella (percorso) — non generare link URL.
-- Per generare PDF o documenti formali: chiedi sempre conferma esplicita all'utente prima di procedere.
-- Se l'utente chiede di "creare un evento" o "aggiungere al calendario" usa create_event.
-- Se chiede di "aggiungere un task", "creare un todo", "ricordami di..." usa create_task.
-- Se chiede dove si trova un file o cerca nel vault usa search_vault.
-- Risposte brevi e dirette. Niente frasi di riempimento.`;
+## USO DEI TOOL — regole TASSATIVE
+
+USA create_task SOLO se l'utente dice esplicitamente una di queste cose:
+  "crea un task", "aggiungi al kanban", "aggiungi una to-do", "mettilo nei task",
+  "ricordami di [azione]", "segna come da fare"
+  ❌ NON usare mai per: generare testo, PDF, documenti, domande, richieste di informazioni
+
+USA create_event SOLO se l'utente dice esplicitamente:
+  "aggiungi al calendario", "crea un evento", "segna una data", "metti in agenda"
+  → Se la data/ora non è specificata, CHIEDILA prima di chiamare il tool
+  ❌ NON usare mai per semplici domande sugli eventi esistenti
+
+USA search_vault SOLO se l'utente chiede esplicitamente dove si trova un file
+  o dice "cerca nel vault / cerca nei documenti"
+
+Se non sei sicuro se usare un tool, NON usarlo — rispondi con testo.
+
+## GENERAZIONE TESTI E PDF
+Per qualsiasi richiesta di: press kit, bio artistica, tech rider, caption social,
+comunicato stampa, CV, documento, PDF, testo formattato →
+→ Genera il contenuto direttamente come testo markdown ben formattato
+→ NON creare task o eventi per soddisfare queste richieste
+→ Alla fine del testo aggiungi sempre questa riga esatta: [PRINTABLE]
+
+## ERRORI DEI TOOL
+Se un tool restituisce un messaggio che inizia con "Errore:", comunicalo chiaramente
+all'utente invece di dire che l'operazione è riuscita.`;
 
 const tools = [
   {
     type: "function",
     function: {
       name: "create_task",
-      description: "Crea un nuovo task nel Kanban Board dell'app",
+      description:
+        "Crea un task nel Kanban Board. Usare SOLO quando l'utente chiede esplicitamente di aggiungere un task/to-do.",
       parameters: {
         type: "object",
         properties: {
           titolo: { type: "string", description: "Titolo del task" },
-          descrizione: { type: "string", description: "Descrizione opzionale del task" },
+          descrizione: { type: "string", description: "Descrizione opzionale" },
           stato: {
             type: "string",
             enum: ["Da Fare", "In Corso", "Completato"],
-            description: "Stato iniziale del task, default 'Da Fare'",
+            description: "Stato iniziale, default 'Da Fare'",
           },
           scadenza: {
             type: "string",
-            description: "Data di scadenza in formato ISO 8601 (es. 2026-05-25T18:00:00), opzionale",
+            description: "Data ISO 8601 (es. 2026-05-30T18:00:00). Opzionale.",
           },
         },
         required: ["titolo"],
@@ -48,21 +69,22 @@ const tools = [
     type: "function",
     function: {
       name: "create_event",
-      description: "Crea un nuovo evento nel calendario dell'app",
+      description:
+        "Crea un evento nel calendario. Usare SOLO quando l'utente chiede esplicitamente di aggiungere un evento/data in agenda. Se la data non è specificata, chiedila all'utente invece di chiamare questo tool.",
       parameters: {
         type: "object",
         properties: {
-          titolo: { type: "string", description: "Titolo dell'evento" },
+          titolo: { type: "string" },
           tipo_evento: {
             type: "string",
-            description: "Tipo evento: live, studio, riunione, release, altro",
+            description: "live | studio | riunione | release | altro",
           },
           data_evento: {
             type: "string",
-            description: "Data e ora dell'evento in formato ISO 8601",
+            description: "Data e ora ISO 8601. OBBLIGATORIA.",
           },
-          luogo: { type: "string", description: "Luogo dell'evento (opzionale)" },
-          note: { type: "string", description: "Note aggiuntive (opzionale)" },
+          luogo: { type: "string" },
+          note: { type: "string" },
         },
         required: ["titolo", "data_evento"],
       },
@@ -72,14 +94,12 @@ const tools = [
     type: "function",
     function: {
       name: "search_vault",
-      description: "Cerca documenti nel Vault per nome file o parole chiave. Restituisce nome file e cartella.",
+      description:
+        "Cerca documenti nel Vault per nome o parole chiave. Restituisce nome file e cartella.",
       parameters: {
         type: "object",
         properties: {
-          query: {
-            type: "string",
-            description: "Parole chiave da cercare tra i file del vault",
-          },
+          query: { type: "string" },
         },
         required: ["query"],
       },
@@ -87,24 +107,28 @@ const tools = [
   },
 ];
 
-type GroqMessage =
+type AIMessage =
   | { role: "system" | "user" | "assistant"; content: string }
-  | { role: "assistant"; content: null; tool_calls: GroqToolCall[] }
+  | { role: "assistant"; content: null; tool_calls: AIToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
-type GroqToolCall = {
+type AIToolCall = {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
 };
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GOOGLE_AI_KEY;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const model = process.env.GOOGLE_AI_MODEL || "gemini-2.0-flash";
 
   if (!apiKey) {
-    return NextResponse.json({ error: "GROQ_API_KEY non configurata." }, { status: 500 });
+    return NextResponse.json(
+      { error: "GOOGLE_AI_KEY non configurata nelle variabili ambiente." },
+      { status: 500 },
+    );
   }
 
   const body = (await request.json()) as {
@@ -126,53 +150,57 @@ export async function POST(request: Request) {
     ? `\n\nContesto attuale del workspace:\n${JSON.stringify(body.context, null, 2)}`
     : "";
 
-  const groqMessages: GroqMessage[] = [
+  const messages: AIMessage[] = [
     { role: "system", content: SYSTEM_PROMPT + contextStr },
     ...body.messages,
   ];
 
-  async function callGroq(messages: GroqMessage[], useTools: boolean) {
+  async function callAI(msgs: AIMessage[], withTools: boolean) {
     const payload: Record<string, unknown> = {
-      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-      temperature: 0.65,
-      max_tokens: 800,
-      messages,
+      model,
+      temperature: 0.6,
+      max_tokens: 1200,
+      messages: msgs,
     };
-    if (useTools) {
+    if (withTools) {
       payload.tools = tools;
       payload.tool_choice = "auto";
     }
-    const res = await fetch(GROQ_ENDPOINT, {
+    const res = await fetch(AI_ENDPOINT, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`Groq ${res.status}: ${err}`);
+      throw new Error(`Google AI ${res.status}: ${err}`);
     }
     return res.json();
   }
 
   try {
-    const first = await callGroq(groqMessages, true);
+    const first = await callAI(messages, true);
     const choice = first.choices?.[0];
 
+    // ── Tool call branch ──────────────────────────────────────────────────────
     if (choice?.finish_reason === "tool_calls" && choice.message?.tool_calls?.length) {
       const supabase =
         supabaseUrl && serviceKey ? createClient(supabaseUrl, serviceKey) : null;
 
-      const assistantMsg: GroqMessage = {
+      const assistantMsg: AIMessage = {
         role: "assistant",
         content: null,
         tool_calls: choice.message.tool_calls,
       };
 
-      const toolResults: GroqMessage[] = [];
+      const toolResults: AIMessage[] = [];
       let actionPerformed = false;
       let actionMessage = "";
 
-      for (const call of choice.message.tool_calls as GroqToolCall[]) {
+      for (const call of choice.message.tool_calls as AIToolCall[]) {
         let args: Record<string, string>;
         try {
           args = JSON.parse(call.function.arguments);
@@ -184,7 +212,7 @@ export async function POST(request: Request) {
 
         if (call.function.name === "create_task") {
           if (!supabase) {
-            result = "Errore: Supabase service key non configurata.";
+            result = "Errore: SUPABASE_SERVICE_ROLE_KEY mancante.";
           } else {
             const { error } = await supabase.from("tasks_kanban").insert({
               titolo: args.titolo,
@@ -195,14 +223,14 @@ export async function POST(request: Request) {
             if (error) {
               result = `Errore creazione task: ${error.message}`;
             } else {
-              result = `Task "${args.titolo}" creato con stato "${args.stato ?? "Da Fare"}"${args.scadenza ? `, scadenza ${args.scadenza}` : ""}.`;
+              result = `OK — Task "${args.titolo}" aggiunto al Kanban con stato "${args.stato ?? "Da Fare"}".`;
               actionPerformed = true;
               actionMessage = `Task "${args.titolo}" creato.`;
             }
           }
         } else if (call.function.name === "create_event") {
           if (!supabase) {
-            result = "Errore: Supabase service key non configurata.";
+            result = "Errore: SUPABASE_SERVICE_ROLE_KEY mancante.";
           } else {
             const { error } = await supabase.from("eventi_calendario").insert({
               titolo: args.titolo,
@@ -215,48 +243,42 @@ export async function POST(request: Request) {
             if (error) {
               result = `Errore creazione evento: ${error.message}`;
             } else {
-              result = `Evento "${args.titolo}" creato per ${args.data_evento}${args.luogo ? ` a ${args.luogo}` : ""}.`;
+              result = `OK — Evento "${args.titolo}" aggiunto al calendario per ${args.data_evento}.`;
               actionPerformed = true;
               actionMessage = `Evento "${args.titolo}" aggiunto al calendario.`;
             }
           }
         } else if (call.function.name === "search_vault") {
-          const vaultFiles = body.context?.vault ?? [];
+          const files = body.context?.vault ?? [];
           const q = (args.query ?? "").toLowerCase();
-          const matches = vaultFiles.filter(
+          const matches = files.filter(
             (f) =>
               f.nome.toLowerCase().includes(q) ||
               (f.cartella ?? "").toLowerCase().includes(q),
           );
           result =
             matches.length > 0
-              ? matches
-                  .map((f) => `"${f.nome}" — cartella: ${f.cartella || "root"}`)
-                  .join("\n")
-              : `Nessun file trovato per "${args.query}" nel Vault.`;
+              ? matches.map((f) => `"${f.nome}" — cartella: ${f.cartella || "root"}`).join("\n")
+              : `Nessun file trovato per "${args.query}".`;
         }
 
-        toolResults.push({
-          role: "tool",
-          tool_call_id: call.id,
-          content: result,
-        });
+        toolResults.push({ role: "tool", tool_call_id: call.id, content: result });
       }
 
-      const finalMessages: GroqMessage[] = [
-        ...groqMessages,
-        assistantMsg,
-        ...toolResults,
-      ];
-
-      const second = await callGroq(finalMessages, false);
+      const second = await callAI([...messages, assistantMsg, ...toolResults], false);
       const text = second.choices?.[0]?.message?.content ?? "";
 
       return NextResponse.json({ text, actionPerformed, actionMessage });
     }
 
+    // ── Normal text response ──────────────────────────────────────────────────
     const text = choice?.message?.content ?? "";
-    return NextResponse.json({ text, actionPerformed: false });
+
+    // Detect printable content (press kit, bio, etc.)
+    const printable = text.includes("[PRINTABLE]");
+    const cleanText = text.replace("[PRINTABLE]", "").trimEnd();
+
+    return NextResponse.json({ text: cleanText, actionPerformed: false, printable });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Errore sconosciuto";
     return NextResponse.json({ error: msg }, { status: 500 });
