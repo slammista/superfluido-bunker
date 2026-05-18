@@ -115,6 +115,9 @@ export function SuperfluidoApp() {
   const [notice, setNotice] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [playingTrack, setPlayingTrack] = useState<Track | null>(null);
+  const [playerAlbumTracks, setPlayerAlbumTracks] = useState<Track[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
 
   function showToast(text: string, kind: "error" | "success" = "error") {
     setToast({ text, kind });
@@ -386,11 +389,11 @@ export function SuperfluidoApp() {
         </div>
       )}
 
-      <section className="mx-auto max-w-7xl px-4 py-6 lg:py-8">
+      <section className={`mx-auto max-w-7xl px-4 py-6 lg:py-8 ${playingTrack ? "pb-28" : ""}`}>
         {notice ? <Notice text={notice} /> : null}
 
         <div className={view === "home" ? "" : "hidden"}>
-          <Overview state={state} user={user} goTo={setView} />
+          <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} />
         </div>
         <div className={view === "inventory" ? "" : "hidden"}>
           <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
@@ -399,7 +402,17 @@ export function SuperfluidoApp() {
           <CalendarModule events={state.events} tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "projects" ? "" : "hidden"}>
-          <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
+          <Projects
+            albums={state.albums}
+            tracks={state.tracks}
+            user={user}
+            reload={() => loadWorkspace(user.id)}
+            onToast={showToast}
+            playingTrack={playingTrack}
+            setPlayingTrack={setPlayingTrack}
+            playerAlbumTracks={playerAlbumTracks}
+            setPlayerAlbumTracks={setPlayerAlbumTracks}
+          />
         </div>
         <div className={view === "distrib" ? "" : "hidden"}>
           <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />
@@ -415,6 +428,37 @@ export function SuperfluidoApp() {
           <Vault files={state.vault} folders={state.folders} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
       </section>
+
+      {/* Persistent audio player */}
+      {playingTrack && (
+        <NowPlayingBar
+          track={playingTrack}
+          album={state.albums.find((a) => a.id === playingTrack.album_id) ?? null}
+          allTracks={playerAlbumTracks}
+          onTrackChange={setPlayingTrack}
+          onClose={() => setPlayingTrack(null)}
+        />
+      )}
+
+      {/* Floating AI chat button */}
+      <button
+        onClick={() => setChatOpen((o) => !o)}
+        className={`fixed right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 ${playingTrack ? "bottom-[88px]" : "bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
+        title="AI Assistant"
+      >
+        <Sparkles size={22} />
+      </button>
+
+      {/* AI chat slide-in panel */}
+      <AIChatPanel
+        state={state}
+        user={user}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        onToast={showToast}
+        reload={() => loadWorkspace(user.id)}
+        playerActive={!!playingTrack}
+      />
     </main>
   );
 }
@@ -699,7 +743,7 @@ function trackPhaseBadge(fase: string | null) {
   return map[fase ?? ""] ?? "bg-white/10 text-white/40";
 }
 
-function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo: (view: View) => void }) {
+function Overview({ state, user, goTo, onToast, reload }: { state: AppState; user: AppUser; goTo: (view: View) => void; onToast: (text: string, kind?: "error" | "success") => void; reload: () => Promise<void> }) {
   const totalStock = state.products.reduce(
     (sum, product) => sum + (product.product_variants ?? []).reduce((variantSum, variant) => variantSum + Number(variant.stock_quantity ?? 0), 0),
     0,
@@ -759,6 +803,11 @@ function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo:
         <Metric title="Alert stock" value={lowStock.length.toString()} tone="red" />
         <Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" />
         <Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" />
+      </section>
+
+      {/* Inline AI widget */}
+      <section className="mt-5">
+        <OverviewAIWidget state={state} user={user} onToast={onToast} reload={reload} />
       </section>
 
       {/* Widget task board */}
@@ -908,6 +957,302 @@ function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo:
     </>
   );
 }
+
+// ── AI helpers ────────────────────────────────────────────────────────────────
+
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
+function buildAIContext(state: AppState) {
+  return {
+    vault: state.vault.map((f) => ({ nome: f.nome_file, cartella: f.cartella || "root" })),
+    tasks: state.tasks.map((t) => ({ titolo: t.titolo, stato: t.stato, scadenza: t.scadenza })),
+    eventi: state.events
+      .filter((e) => new Date(e.data_evento) >= new Date())
+      .slice(0, 8)
+      .map((e) => ({ titolo: e.titolo, data: e.data_evento, luogo: e.luogo })),
+    album_in_lavorazione: state.albums
+      .filter((a) => !a.stato || a.stato === "in_progress")
+      .map((a) => ({ nome: a.nome_album })),
+  };
+}
+
+async function sendToAI(
+  messages: ChatMessage[],
+  context: ReturnType<typeof buildAIContext>,
+  userId: string,
+): Promise<{ text: string; actionPerformed: boolean; actionMessage?: string }> {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, context, userId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Errore AI");
+  return data;
+}
+
+// ── OverviewAIWidget ──────────────────────────────────────────────────────────
+
+function OverviewAIWidget({
+  state,
+  user,
+  onToast,
+  reload,
+}: {
+  state: AppState;
+  user: AppUser;
+  onToast: (text: string, kind?: "error" | "success") => void;
+  reload: () => Promise<void>;
+}) {
+  const [input, setInput] = useState("");
+  const [response, setResponse] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function ask() {
+    const text = input.trim();
+    if (!text || loading) return;
+    setLoading(true);
+    setInput("");
+    try {
+      const data = await sendToAI(
+        [{ role: "user", content: text }],
+        buildAIContext(state),
+        user.id,
+      );
+      setResponse(data.text);
+      if (data.actionPerformed) {
+        await reload();
+        onToast(data.actionMessage ?? "Operazione completata.", "success");
+      }
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : "Errore AI");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const SUGGESTIONS = [
+    "Crea un task per il prossimo showcase",
+    "Aggiungi un evento in studio per venerdì",
+    "Cerca contratti nel Vault",
+  ];
+
+  return (
+    <div className="glass rounded-md p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <Sparkles size={16} className="text-orange-300" />
+        <p className="font-black text-white">AI Assistant</p>
+        <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
+          Groq · llama-3.3-70b
+        </span>
+      </div>
+
+      {!response && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setInput(s)}
+              className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/55 transition hover:border-orange-400/30 hover:text-white/80"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {response && (
+        <div className="mb-4 rounded-md border border-white/8 bg-white/[0.035] px-4 py-3 text-sm leading-6 text-white/80">
+          {response}
+          <button
+            onClick={() => setResponse(null)}
+            className="mt-2 block text-xs text-white/30 hover:text-white/60 transition"
+          >
+            Nuova domanda
+          </button>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ask()}
+          placeholder="Crea un task, aggiungi un evento, cerca nel vault…"
+          className="flex-1 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-orange-500/40 focus:outline-none"
+        />
+        <button
+          onClick={ask}
+          disabled={!input.trim() || loading}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-orange-500 text-black transition hover:bg-orange-300 disabled:opacity-40"
+        >
+          {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── AIChatPanel (floating slide-in) ──────────────────────────────────────────
+
+function AIChatPanel({
+  state,
+  user,
+  open,
+  onClose,
+  onToast,
+  reload,
+  playerActive,
+}: {
+  state: AppState;
+  user: AppUser;
+  open: boolean;
+  onClose: () => void;
+  onToast: (text: string, kind?: "error" | "success") => void;
+  reload: () => Promise<void>;
+  playerActive: boolean;
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, aiLoading]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || aiLoading) return;
+    const userMsg: ChatMessage = { role: "user", content: text };
+    const nextMessages = [...messages, userMsg];
+    setInput("");
+    setMessages(nextMessages);
+    setAiLoading(true);
+    try {
+      const data = await sendToAI(nextMessages, buildAIContext(state), user.id);
+      setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
+      if (data.actionPerformed) {
+        await reload();
+        onToast(data.actionMessage ?? "Operazione completata.", "success");
+      }
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : "Errore AI");
+      setMessages((prev) => prev.slice(0, -1));
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  const CHIPS = [
+    "Crea un task urgente",
+    "Aggiungi un live al calendario",
+    "Dove sono i contratti?",
+    "Cosa abbiamo in lavorazione?",
+  ];
+
+  return (
+    <div
+      className={`fixed inset-y-0 right-0 z-40 flex w-[360px] flex-col border-l border-white/10 bg-[#0a0a0a] shadow-2xl transition-transform duration-300 ${open ? "translate-x-0" : "translate-x-full"} ${playerActive ? "pb-[72px]" : ""}`}
+    >
+      {/* Header */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3">
+        <Sparkles size={15} className="text-orange-300" />
+        <p className="flex-1 text-sm font-black text-white">AI Assistant</p>
+        <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
+          Groq
+        </span>
+        <button onClick={onClose} className="ml-1 text-white/35 transition hover:text-white">
+          <X size={15} />
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {messages.length === 0 && (
+          <div className="mt-4 space-y-3">
+            <p className="text-center text-sm text-white/35">
+              Posso creare task, aggiungere eventi, cercare nel Vault e rispondere a domande sul collettivo.
+            </p>
+            <div className="mt-4 space-y-2">
+              {CHIPS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setInput(s)}
+                  className="w-full rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5 text-left text-sm text-white/55 transition hover:border-white/15 hover:text-white/80"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((msg, i) => (
+          <div key={i} className={`mb-3 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div
+              className={`max-w-[85%] rounded-md px-3 py-2 text-sm leading-6 ${
+                msg.role === "user"
+                  ? "bg-orange-500/20 text-white"
+                  : "bg-white/[0.06] text-white/85"
+              }`}
+            >
+              {msg.content}
+            </div>
+          </div>
+        ))}
+
+        {aiLoading && (
+          <div className="mb-3 flex justify-start">
+            <div className="rounded-md bg-white/[0.06] px-3 py-2.5">
+              <div className="flex gap-1">
+                {[0, 0.15, 0.3].map((d, i) => (
+                  <span
+                    key={i}
+                    className="block h-1.5 w-1.5 animate-bounce rounded-full bg-white/40"
+                    style={{ animationDelay: `${d}s` }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div className="shrink-0 border-t border-white/10 p-3">
+        {messages.length > 0 && (
+          <button
+            onClick={() => setMessages([])}
+            className="mb-2 text-[11px] text-white/25 transition hover:text-white/50"
+          >
+            Nuova conversazione
+          </button>
+        )}
+        <div className="flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
+            placeholder="Scrivi un messaggio…"
+            className="flex-1 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-orange-500/40 focus:outline-none"
+          />
+          <button
+            onClick={send}
+            disabled={!input.trim() || aiLoading}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-orange-500 text-black transition hover:bg-orange-300 disabled:opacity-40"
+          >
+            <Send size={15} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Metric card ───────────────────────────────────────────────────────────────
 
 function Metric({ title, value, tone }: { title: string; value: string; tone: "orange" | "red" | "blue" | "green" }) {
   const tones = {
@@ -1586,7 +1931,20 @@ function NowPlayingBar({
 }
 
 // FIX 4: Projects completamente riscritto con griglia album
-function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; tracks: Track[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
+function Projects({
+  albums, tracks, user, reload, onToast,
+  playingTrack, setPlayingTrack, playerAlbumTracks, setPlayerAlbumTracks,
+}: {
+  albums: Album[];
+  tracks: Track[];
+  user: AppUser;
+  reload: () => Promise<void>;
+  onToast: (text: string, kind?: "error" | "success") => void;
+  playingTrack: Track | null;
+  setPlayingTrack: (t: Track | null) => void;
+  playerAlbumTracks: Track[];
+  setPlayerAlbumTracks: (t: Track[]) => void;
+}) {
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
   const [showAlbumForm, setShowAlbumForm] = useState(false);
   const [showTrackForm, setShowTrackForm] = useState(false);
@@ -1597,8 +1955,6 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
   const [uploadingCover, setUploadingCover] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [savingTrackInfo, setSavingTrackInfo] = useState(false);
-  const [playingTrack, setPlayingTrack] = useState<Track | null>(null);
-  const [playerAlbumTracks, setPlayerAlbumTracks] = useState<Track[]>([]);
 
   async function createAlbum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2001,15 +2357,6 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
             </div>
           )}
         </div>
-        {playingTrack && (
-          <NowPlayingBar
-            track={playingTrack}
-            album={albums.find((a) => a.id === playingTrack.album_id) ?? null}
-            allTracks={playerAlbumTracks}
-            onTrackChange={(t) => setPlayingTrack(t)}
-            onClose={() => setPlayingTrack(null)}
-          />
-        )}
       </>
     );
   }
