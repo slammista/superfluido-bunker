@@ -1005,10 +1005,11 @@ function OverviewAIWidget({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = msgsRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, aiLoading]);
 
   async function send() {
@@ -1064,7 +1065,7 @@ function OverviewAIWidget({
       </div>
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div ref={msgsRef} className="flex-1 overflow-y-auto px-5 py-4">
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-5">
             <div className="text-center">
@@ -1143,7 +1144,6 @@ function OverviewAIWidget({
           </div>
         )}
 
-        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
@@ -1191,10 +1191,11 @@ function AIChatPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = msgsRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, aiLoading]);
 
   async function send() {
@@ -1247,7 +1248,7 @@ function AIChatPanel({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div ref={msgsRef} className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 && (
           <div className="mt-4 space-y-3">
             <p className="text-center text-sm text-white/35">
@@ -1313,7 +1314,6 @@ function AIChatPanel({
           </div>
         )}
 
-        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
