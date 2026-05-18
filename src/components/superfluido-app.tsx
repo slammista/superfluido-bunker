@@ -707,7 +707,7 @@ function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo:
   const lowStock = state.products.filter((product) => (product.product_variants ?? []).some((variant) => Number(variant.stock_quantity) < 6));
   const upcomingReleases = [...state.albums]
     .filter((a) => a.release_date && (a.stato === "upcoming" || a.stato === "released"))
-    .sort((a, b) => new Date(a.release_date!).getTime() - new Date(b.release_date!).getTime())
+    .sort((a, b) => new Date(b.release_date!).getTime() - new Date(a.release_date!).getTime())
     .slice(0, 5);
   const recentTracks = state.tracks.slice(0, 5);
 
@@ -2048,15 +2048,17 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
         </form>
       )}
 
-      {/* Griglia album */}
-      {albums.length === 0 ? (
+      {/* Griglia album — solo progetti in lavorazione */}
+      {(() => {
+        const wipAlbums = albums.filter((a) => !a.stato || a.stato === "in_progress" || a.stato === "upcoming");
+        return wipAlbums.length === 0 ? (
         <div className="glass rounded-md p-10 text-center">
           <Music size={36} className="mx-auto mb-4 text-white/20" />
-          <p className="text-sm text-white/40">Nessun album creato. Comincia creando il primo progetto.</p>
+          <p className="text-sm text-white/40">Nessun progetto in lavorazione. Creane uno o sposta una release in "In Lavorazione" da Distrib.</p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {albums.map((album) => {
+          {wipAlbums.map((album) => {
             const count = tracks.filter((t) => t.album_id === album.id).length;
             return (
               <button
@@ -2084,7 +2086,8 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
             );
           })}
         </div>
-      )}
+      );
+      })()}
 
       {/* Tracce non assegnate */}
       {unassignedTracks.length > 0 && (
@@ -2483,11 +2486,11 @@ function Distrib({
                             <select
                               value={album.stato ?? "in_progress"}
                               onChange={(e) => updateStato(album.id, e.target.value)}
-                              className="field flex-1 rounded px-2 py-1 text-xs"
+                              className="flex-1 rounded border border-white/20 bg-white/10 px-2 py-1 text-xs font-semibold text-white focus:outline-none focus:border-orange-500/60"
                             >
-                              <option value="in_progress">In Lavorazione</option>
-                              <option value="upcoming">In Arrivo</option>
-                              <option value="released">Uscito</option>
+                              <option value="in_progress" className="bg-neutral-900 text-white">In Lavorazione</option>
+                              <option value="upcoming" className="bg-neutral-900 text-white">In Arrivo</option>
+                              <option value="released" className="bg-neutral-900 text-white">Uscito</option>
                             </select>
                           )}
                           <button
