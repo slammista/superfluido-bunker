@@ -402,7 +402,7 @@ export function SuperfluidoApp() {
           <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "distrib" ? "" : "hidden"}>
-          <Distrib albums={state.albums} profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />
+          <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />
         </div>
         <div className={view === "press" ? "" : "hidden"}>
           {/* FIX 5: passa user e onToast a PressKit */}
@@ -2138,25 +2138,14 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
 
 type DistribSection = "album" | "single" | "collab" | "wip";
 
-type SpotifyAlbumPreview = {
-  spotify_id: string;
-  nome_album: string;
-  release_date: string | null;
-  cover_url: string | null;
-  link_spotify: string | null;
-  artist_name: string;
-};
-
 function Distrib({
   albums,
-  profiles,
   user,
   reload,
   onToast,
   goTo,
 }: {
   albums: Album[];
-  profiles: ArtistProfile[];
   user: AppUser;
   reload: () => Promise<void>;
   onToast: (msg: string, kind?: "error" | "success") => void;
@@ -2177,14 +2166,6 @@ function Distrib({
     spotify_album_id: "",
     spotify_cover_url: "",
   });
-
-  // Import bulk
-  const [showImport, setShowImport] = useState(false);
-  const [extraArtistUrls, setExtraArtistUrls] = useState("");
-  const [importItems, setImportItems] = useState<SpotifyAlbumPreview[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [loadingImport, setLoadingImport] = useState(false);
-  const [importingBulk, setImportingBulk] = useState(false);
 
   async function autoFillFromSpotify() {
     if (!spotifyUrl.trim()) return;
@@ -2212,84 +2193,6 @@ function Distrib({
       onToast(e instanceof Error ? e.message : "Errore");
     } finally {
       setAutoFilling(false);
-    }
-  }
-
-  async function loadImportItems() {
-    setLoadingImport(true);
-    setImportItems([]);
-    setSelectedIds(new Set());
-    try {
-      // Collect artist IDs: from profiles + extra textarea
-      const profileUrls = profiles.map((p) => p.link_spotify).filter(Boolean) as string[];
-      const extraLines = extraArtistUrls.split(/\n|,/).map((s) => s.trim()).filter(Boolean);
-      const allUrls = [...profileUrls, ...extraLines];
-      if (allUrls.length === 0) { onToast("Aggiungi almeno un profilo Spotify negli Artisti o incolla un URL qui sotto."); setLoadingImport(false); return; }
-
-      // Extract artist IDs
-      const artistIds = allUrls
-        .map((url) => url.match(/spotify\.com\/artist\/([A-Za-z0-9]+)/)?.[1] ?? url.match(/^([A-Za-z0-9]{22})$/)?.[1])
-        .filter(Boolean) as string[];
-
-      if (artistIds.length === 0) { onToast("Nessun ID artista valido trovato. Usa URL Spotify (open.spotify.com/artist/...)."); setLoadingImport(false); return; }
-
-      // Fetch albums for each artist
-      const results = await Promise.allSettled(
-        artistIds.map((id) =>
-          fetch("/api/spotify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "artist_albums", artistId: id }) })
-            .then((r) => r.json() as Promise<{ items?: SpotifyAlbumPreview[]; error?: string }>)
-        )
-      );
-
-      const allItems: SpotifyAlbumPreview[] = [];
-      const seen = new Set<string>();
-      for (const r of results) {
-        if (r.status === "fulfilled" && r.value.items) {
-          for (const item of r.value.items) {
-            if (!seen.has(item.spotify_id)) { seen.add(item.spotify_id); allItems.push(item); }
-          }
-        }
-      }
-
-      // Filter out already-imported albums (by spotify_album_id)
-      const existingIds = new Set(albums.map((a) => a.spotify_album_id).filter(Boolean));
-      const newItems = allItems.filter((i) => !existingIds.has(i.spotify_id));
-      newItems.sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? ""));
-
-      setImportItems(newItems);
-      setSelectedIds(new Set(newItems.map((i) => i.spotify_id)));
-      if (newItems.length === 0) onToast("Tutti gli album trovati sono già presenti nel catalogo.", "success");
-    } catch (err) {
-      onToast(err instanceof Error ? err.message : "Errore caricamento");
-    } finally {
-      setLoadingImport(false);
-    }
-  }
-
-  async function bulkImport() {
-    const toImport = importItems.filter((i) => selectedIds.has(i.spotify_id));
-    if (toImport.length === 0) { onToast("Seleziona almeno un album."); return; }
-    setImportingBulk(true);
-    try {
-      const rows = toImport.map((item) => ({
-        creato_da: user.id,
-        nome_album: item.nome_album,
-        release_date: item.release_date ?? null,
-        stato: "released",
-        link_spotify: item.link_spotify ?? null,
-        spotify_album_id: item.spotify_id,
-        cover_image_url: item.cover_url ?? null,
-      }));
-      const { error } = await getSupabase().from("album_progetti").insert(rows);
-      if (error) throw error;
-      onToast(`${toImport.length} album importati.`, "success");
-      await reload();
-      setShowImport(false);
-      setImportItems([]);
-    } catch (err) {
-      onToast(err instanceof Error ? err.message : "Errore importazione");
-    } finally {
-      setImportingBulk(false);
     }
   }
 
@@ -2371,97 +2274,12 @@ function Distrib({
       {/* Action buttons */}
       <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
         <button
-          onClick={() => { setShowImport(!showImport); setShowForm(false); }}
-          className="inline-flex items-center gap-2 rounded-md border border-orange-500/40 px-4 py-2 text-sm font-bold text-orange-300 transition hover:bg-orange-500/10"
-        >
-          <Download size={15} /> Importa da Spotify
-        </button>
-        <button
-          onClick={() => { setShowForm(!showForm); setShowImport(false); }}
+          onClick={() => setShowForm(!showForm)}
           className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400"
         >
           <Plus size={16} /> Aggiungi
         </button>
       </div>
-
-      {/* Import panel */}
-      {showImport && (
-        <div className="glass mb-6 rounded-md p-5">
-          <p className="mb-1 text-sm font-bold text-white">Importa discografia da Spotify</p>
-          <p className="mb-4 text-xs text-white/40">
-            Legge i link Spotify dai profili artisti. Puoi aggiungere altri URL artisti sotto (uno per riga).
-          </p>
-          <div className="mb-3">
-            <p className="mb-1 text-xs text-white/50">Profili con Spotify collegato:</p>
-            {profiles.filter((p) => p.link_spotify).length === 0 ? (
-              <p className="text-xs text-orange-300">Nessun profilo ha ancora un link Spotify. Aggiungili in Profili.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {profiles.filter((p) => p.link_spotify).map((p) => (
-                  <span key={p.user_id} className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">{p.nome_arte ?? p.user_id}</span>
-                ))}
-              </div>
-            )}
-          </div>
-          <textarea
-            className="field mb-3 w-full rounded-md px-3 py-2 text-sm"
-            rows={3}
-            placeholder="URL artisti extra (uno per riga): open.spotify.com/artist/..."
-            value={extraArtistUrls}
-            onChange={(e) => setExtraArtistUrls(e.target.value)}
-          />
-          <button
-            onClick={loadImportItems}
-            disabled={loadingImport}
-            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400 disabled:opacity-40"
-          >
-            {loadingImport ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-            {loadingImport ? "Caricamento..." : "Carica albums"}
-          </button>
-
-          {importItems.length > 0 && (
-            <div className="mt-5">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-bold text-white">{importItems.length} nuovi album trovati</p>
-                <div className="flex gap-2 text-xs">
-                  <button onClick={() => setSelectedIds(new Set(importItems.map((i) => i.spotify_id)))} className="text-orange-300 hover:text-white">Seleziona tutti</button>
-                  <span className="text-white/20">|</span>
-                  <button onClick={() => setSelectedIds(new Set())} className="text-white/40 hover:text-white">Deseleziona</button>
-                </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-96 overflow-y-auto pr-1">
-                {importItems.map((item) => (
-                  <label key={item.spotify_id} className={`glass flex cursor-pointer items-center gap-3 rounded-md p-3 transition ${selectedIds.has(item.spotify_id) ? "border border-orange-500/40" : "opacity-50"}`}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(item.spotify_id)}
-                      onChange={(e) => {
-                        const next = new Set(selectedIds);
-                        e.target.checked ? next.add(item.spotify_id) : next.delete(item.spotify_id);
-                        setSelectedIds(next);
-                      }}
-                      className="accent-orange-500"
-                    />
-                    {item.cover_url && <Image src={item.cover_url} alt="" width={40} height={40} className="shrink-0 rounded object-cover" unoptimized />}
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">{item.nome_album}</p>
-                      <p className="text-xs text-white/40">{item.artist_name} · {item.release_date?.slice(0, 4) ?? "—"}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-              <button
-                onClick={bulkImport}
-                disabled={importingBulk || selectedIds.size === 0}
-                className="mt-4 inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400 disabled:opacity-40"
-              >
-                {importingBulk ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                Importa {selectedIds.size} album selezionati
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Form */}
       {showForm && (
@@ -2837,63 +2655,180 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
 
 function Profiles({ profiles, user, reload, onToast }: { profiles: ArtistProfile[]; user: AppUser; reload: () => Promise<void>; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
 
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const myProfile = profiles.find((p) => p.user_id === user.id);
+
+  function startEdit(profile: ArtistProfile) {
+    setEditingId(profile.user_id);
+    setEditForm({
+      nome_arte:      profile.nome_arte ?? "",
+      strumentazione: profile.strumentazione ?? "",
+      bio_breve:      profile.bio_breve ?? "",
+      email_contatto: profile.email_contatto ?? "",
+      link_instagram: profile.link_instagram ?? "",
+      link_spotify:   profile.link_spotify ?? "",
+    });
+  }
+
+  async function saveEdit(targetUserId: string) {
+    if (!editForm.nome_arte?.trim()) { onToast("Il nome arte è obbligatorio."); return; }
     setSaving(true);
     try {
-      const form = new FormData(event.currentTarget);
-      const nome_arte = String(form.get("nome_arte") ?? "").trim();
-
-      if (!nome_arte) {
-        onToast("Il nome arte è obbligatorio.");
-        return;
-      }
-
       const { error } = await getSupabase().from("profili_artisti").upsert({
-        user_id: user.id,
-        nome_arte,
-        strumentazione: form.get("strumentazione") || null,
-        bio_breve: form.get("bio_breve") || null,
-        email_contatto: form.get("email_contatto") || null,
-        link_instagram: form.get("link_instagram") || null,
-        link_spotify: form.get("link_spotify") || null,
+        user_id:        targetUserId,
+        nome_arte:      editForm.nome_arte.trim(),
+        strumentazione: editForm.strumentazione || null,
+        bio_breve:      editForm.bio_breve || null,
+        email_contatto: editForm.email_contatto || null,
+        link_instagram: editForm.link_instagram || null,
+        link_spotify:   editForm.link_spotify || null,
       });
-
-      if (error) {
-        onToast(`Errore profilo: ${error.message}`);
-        return;
-      }
-
+      if (error) throw error;
       onToast("Profilo salvato.", "success");
+      setEditingId(null);
       await reload();
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Errore");
     } finally {
       setSaving(false);
     }
   }
 
+  async function createMyProfile() {
+    setSaving(true);
+    try {
+      const { error } = await getSupabase().from("profili_artisti").insert({ user_id: user.id, nome_arte: user.email.split("@")[0] });
+      if (error) throw error;
+      onToast("Profilo creato.", "success");
+      await reload();
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Errore");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const ef = editForm;
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setEditForm((p) => ({ ...p, [k]: e.target.value }));
+
   return (
     <>
-      <ModuleHeader title="Profili" text="Anagrafiche artistiche usate da press kit, booking e materiali pubblici." icon={UserRound} />
-      <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
-        <form onSubmit={saveProfile} className="glass rounded-md p-5">
-          <Input name="nome_arte" label="Nome arte" required />
-          <Input name="strumentazione" label="Strumentazione" />
-          <Input name="email_contatto" label="Email contatto" type="email" />
-          <Input name="link_instagram" label="Instagram" />
-          <Input name="link_spotify" label="Spotify" />
-          <Textarea name="bio_breve" label="Bio breve" />
-          <ActionButton icon={Download} text="Salva profilo" loading={saving} />
-        </form>
-        <div className="grid gap-4 md:grid-cols-2">
-          {profiles.map((profile) => (
-            <article key={profile.user_id} className="glass rounded-md p-5">
-              <p className="text-2xl font-black text-white">{profile.nome_arte || "Profilo senza nome"}</p>
-              <p className="mt-2 text-sm text-orange-200">{profile.strumentazione || "Setup non indicato"}</p>
-              <p className="mt-4 text-sm leading-6 text-white/60">{profile.bio_breve || "Bio non ancora compilata."}</p>
-            </article>
-          ))}
+      <ModuleHeader title="Profili" text="Anagrafiche artistiche del collettivo." icon={UserRound} />
+
+      {!myProfile && (
+        <div className="glass mb-5 flex items-center justify-between rounded-md p-4">
+          <p className="text-sm text-white/60">Non hai ancora un profilo artista.</p>
+          <button
+            onClick={createMyProfile}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-3 py-1.5 text-sm font-bold text-white transition hover:bg-orange-400 disabled:opacity-40"
+          >
+            <Plus size={14} /> Crea il mio profilo
+          </button>
         </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {profiles.map((profile) =>
+          editingId === profile.user_id ? (
+            <article key={profile.user_id} className="glass rounded-md p-5">
+              <p className="mb-4 text-xs font-bold uppercase tracking-widest text-orange-400">Modifica profilo</p>
+              <div className="grid gap-3">
+                <input
+                  className="field rounded-md px-3 py-2 text-sm"
+                  placeholder="Nome arte *"
+                  value={ef.nome_arte}
+                  onChange={set("nome_arte")}
+                />
+                <input
+                  className="field rounded-md px-3 py-2 text-sm"
+                  placeholder="Strumentazione / ruolo"
+                  value={ef.strumentazione}
+                  onChange={set("strumentazione")}
+                />
+                <input
+                  className="field rounded-md px-3 py-2 text-sm"
+                  placeholder="Email contatto"
+                  type="email"
+                  value={ef.email_contatto}
+                  onChange={set("email_contatto")}
+                />
+                <input
+                  className="field rounded-md px-3 py-2 text-sm"
+                  placeholder="Instagram (URL)"
+                  value={ef.link_instagram}
+                  onChange={set("link_instagram")}
+                />
+                <input
+                  className="field rounded-md px-3 py-2 text-sm"
+                  placeholder="Spotify (URL)"
+                  value={ef.link_spotify}
+                  onChange={set("link_spotify")}
+                />
+                <textarea
+                  className="field rounded-md px-3 py-2 text-sm"
+                  rows={3}
+                  placeholder="Bio breve"
+                  value={ef.bio_breve}
+                  onChange={set("bio_breve")}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => saveEdit(profile.user_id)}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400 disabled:opacity-40"
+                  >
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salva
+                  </button>
+                  <button
+                    onClick={() => setEditingId(null)}
+                    className="rounded-md border border-white/10 px-4 py-2 text-sm text-white/60 hover:text-white"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            </article>
+          ) : (
+            <article key={profile.user_id} className="glass rounded-md p-5">
+              <div className="mb-1 flex items-start justify-between gap-2">
+                <p className="text-2xl font-black leading-tight text-white">{profile.nome_arte || "Profilo senza nome"}</p>
+                <button
+                  onClick={() => startEdit(profile)}
+                  title="Modifica"
+                  className="mt-1 shrink-0 rounded border border-white/10 p-1.5 text-white/30 transition hover:border-orange-500/40 hover:text-orange-300"
+                >
+                  <Pencil size={13} />
+                </button>
+              </div>
+              <p className="text-sm text-orange-200">{profile.strumentazione || "Setup non indicato"}</p>
+              <p className="mt-3 text-sm leading-6 text-white/60">{profile.bio_breve || "Bio non ancora compilata."}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {profile.link_instagram && (
+                  <a href={profile.link_instagram} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded border border-white/10 px-2.5 py-1 text-xs text-white/50 transition hover:text-white">
+                    <ExternalLink size={10} /> Instagram
+                  </a>
+                )}
+                {profile.link_spotify && (
+                  <a href={profile.link_spotify} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/20">
+                    <ExternalLink size={10} /> Spotify
+                  </a>
+                )}
+                {profile.email_contatto && (
+                  <a href={`mailto:${profile.email_contatto}`}
+                    className="inline-flex items-center gap-1 rounded border border-white/10 px-2.5 py-1 text-xs text-white/50 transition hover:text-white">
+                    {profile.email_contatto}
+                  </a>
+                )}
+              </div>
+            </article>
+          )
+        )}
       </div>
     </>
   );
