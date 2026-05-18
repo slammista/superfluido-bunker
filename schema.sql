@@ -152,6 +152,7 @@ ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS link_apple         text;
 ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS link_bandcamp      text;
 ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS spotify_album_id   text;
 ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS spotify_cover_url  text;
+ALTER TABLE album_progetti ADD COLUMN IF NOT EXISTS tipo_release       text; -- 'album','single','ep','compilation','collab'
 
 -- =========================================================
 -- STORAGE BUCKET

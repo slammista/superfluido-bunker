@@ -35,6 +35,7 @@ export type Album = {
   cover_image_url?: string | null;
   release_date?: string | null;
   stato?: string | null;
+  tipo_release?: string | null;
   link_spotify?: string | null;
   link_apple?: string | null;
   link_bandcamp?: string | null;
