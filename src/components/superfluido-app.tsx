@@ -2155,6 +2155,7 @@ function Distrib({
   const [saving, setSaving] = useState(false);
   const [spotifyUrl, setSpotifyUrl] = useState("");
   const [autoFilling, setAutoFilling] = useState(false);
+  const [activeSection, setActiveSection] = useState<DistribSection>("album");
   const [form, setForm] = useState({
     nome_album: "",
     release_date: "",
@@ -2386,114 +2387,133 @@ function Distrib({
         </div>
       )}
 
-      {/* Sections */}
+      {/* Tab bar + grid */}
       {albums.length === 0 ? (
         <div className="py-20 text-center text-white/30">
           <Radio size={40} className="mx-auto mb-3 opacity-30" />
           <p className="text-lg font-black">Nessuna release</p>
           <p className="mt-1 text-sm">Aggiungi la prima con il pulsante in alto</p>
         </div>
-      ) : (
-        <div className="space-y-12">
-          {([
-            { key: "wip",    label: "In Lavorazione", list: wip,        accent: "text-orange-300" },
-            { key: "album",  label: "Album",           list: fullAlbums, accent: "text-white" },
-            { key: "single", label: "Singoli",         list: singoli,    accent: "text-white" },
-            { key: "collab", label: "Presente in",     list: collab,     accent: "text-white" },
-          ] as { key: DistribSection; label: string; list: Album[]; accent: string }[])
-            .filter(({ list }) => list.length > 0)
-            .map(({ key, label, list, accent }) => (
-              <section key={key}>
-                <h2 className={`mb-4 text-xl font-black tracking-tight ${accent}`}>
+      ) : (() => {
+        const SECTIONS = [
+          { key: "wip"    as DistribSection, label: "In Lavorazione", list: wip        },
+          { key: "album"  as DistribSection, label: "Album",           list: fullAlbums },
+          { key: "single" as DistribSection, label: "Singoli",         list: singoli    },
+          { key: "collab" as DistribSection, label: "Presente in",     list: collab     },
+        ].filter(({ list }) => list.length > 0);
+
+        const current = SECTIONS.find((s) => s.key === activeSection) ?? SECTIONS[0];
+
+        return (
+          <>
+            {/* Tabs */}
+            <div className="mb-6 flex gap-1 overflow-x-auto rounded-md border border-white/10 bg-white/[0.035] p-1">
+              {SECTIONS.map(({ key, label, list }) => (
+                <button
+                  key={key}
+                  onClick={() => setActiveSection(key)}
+                  className={`shrink-0 rounded px-4 py-1.5 text-sm font-semibold transition ${
+                    (current?.key ?? SECTIONS[0]?.key) === key
+                      ? "bg-orange-500 text-white"
+                      : "text-white/50 hover:text-white"
+                  }`}
+                >
                   {label}
-                  <span className="ml-2 text-sm font-normal text-white/30">{list.length}</span>
-                </h2>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {list.map((album) => {
-                    const cover = album.cover_image_url;
-                    return (
-                      <article key={album.id} className="glass group overflow-hidden rounded-md">
-                        <div className="relative h-44 w-full bg-white/[0.04]">
-                          {cover ? (
-                            <Image src={cover} alt={album.nome_album} fill className="object-cover" unoptimized />
-                          ) : (
-                            <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumGradient(album.id)}`}>
-                              <Music size={40} className="text-white/30" />
-                            </div>
+                  <span className="ml-1.5 text-xs opacity-60">({list.length})</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Grid */}
+            {current && current.list.length === 0 ? (
+              <p className="py-16 text-center text-sm text-white/30">Nessuna release in questa sezione.</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {(current ?? SECTIONS[0])?.list.map((album) => {
+                  const cover = album.cover_image_url;
+                  const isWip = current?.key === "wip";
+                  return (
+                    <article key={album.id} className="glass group overflow-hidden rounded-md">
+                      <div className="relative h-44 w-full bg-white/[0.04]">
+                        {cover ? (
+                          <Image src={cover} alt={album.nome_album} fill className="object-cover" unoptimized />
+                        ) : (
+                          <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumGradient(album.id)}`}>
+                            <Music size={40} className="text-white/30" />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                        <div className="absolute bottom-3 left-3 right-3">
+                          <p className="font-black leading-tight text-white">{album.nome_album}</p>
+                          {album.release_date && (
+                            <p className="mt-0.5 text-xs text-white/60">
+                              {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "long", day: "numeric" })}
+                            </p>
                           )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                          <div className="absolute bottom-3 left-3 right-3">
-                            <p className="font-black leading-tight text-white">{album.nome_album}</p>
-                            {album.release_date && (
-                              <p className="mt-0.5 text-xs text-white/60">
-                                {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "long", day: "numeric" })}
-                              </p>
-                            )}
-                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4">
+                        <div className="flex flex-wrap gap-2">
+                          {album.link_spotify && (
+                            <a href={album.link_spotify} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20">
+                              <ExternalLink size={10} /> Spotify
+                            </a>
+                          )}
+                          {album.link_apple && (
+                            <a href={album.link_apple} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-xs font-semibold text-pink-300 transition hover:bg-pink-500/20">
+                              <ExternalLink size={10} /> Apple Music
+                            </a>
+                          )}
+                          {album.link_bandcamp && (
+                            <a href={album.link_bandcamp} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20">
+                              <ExternalLink size={10} /> Deezer
+                            </a>
+                          )}
+                          {!album.link_spotify && !album.link_apple && !album.link_bandcamp && (
+                            <span className="text-xs text-white/30">Nessun link</span>
+                          )}
                         </div>
 
-                        <div className="p-4">
-                          <div className="flex flex-wrap gap-2">
-                            {album.link_spotify && (
-                              <a href={album.link_spotify} target="_blank" rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20">
-                                <ExternalLink size={10} /> Spotify
-                              </a>
-                            )}
-                            {album.link_apple && (
-                              <a href={album.link_apple} target="_blank" rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-xs font-semibold text-pink-300 transition hover:bg-pink-500/20">
-                                <ExternalLink size={10} /> Apple Music
-                              </a>
-                            )}
-                            {album.link_bandcamp && (
-                              <a href={album.link_bandcamp} target="_blank" rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20">
-                                <ExternalLink size={10} /> Deezer
-                              </a>
-                            )}
-                            {!album.link_spotify && !album.link_apple && !album.link_bandcamp && (
-                              <span className="text-xs text-white/30">Nessun link</span>
-                            )}
-                          </div>
-
-                          <div className="mt-3 flex items-center gap-2">
-                            {key === "wip" && (
-                              <select
-                                value={album.stato ?? "in_progress"}
-                                onChange={(e) => updateStato(album.id, e.target.value)}
-                                className="field flex-1 rounded px-2 py-1 text-xs"
-                              >
-                                <option value="in_progress">In Lavorazione</option>
-                                <option value="upcoming">In Arrivo</option>
-                                <option value="released">Uscito</option>
-                              </select>
-                            )}
-                            <button
-                              onClick={() => goTo("projects")}
-                              title="Vedi in Studio Hub"
-                              className="inline-flex h-7 w-7 items-center justify-center rounded border border-white/10 text-white/30 transition hover:border-orange-500/40 hover:text-orange-300"
+                        <div className="mt-3 flex items-center gap-2">
+                          {isWip && (
+                            <select
+                              value={album.stato ?? "in_progress"}
+                              onChange={(e) => updateStato(album.id, e.target.value)}
+                              className="field flex-1 rounded px-2 py-1 text-xs"
                             >
-                              <Disc3 size={13} />
-                            </button>
-                            <button
-                              onClick={() => deleteRelease(album.id)}
-                              className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-400/20 text-red-400/30 transition hover:bg-red-500/10 hover:text-red-300"
-                              title="Elimina"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
+                              <option value="in_progress">In Lavorazione</option>
+                              <option value="upcoming">In Arrivo</option>
+                              <option value="released">Uscito</option>
+                            </select>
+                          )}
+                          <button
+                            onClick={() => goTo("projects")}
+                            title="Vedi in Studio Hub"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-white/10 text-white/30 transition hover:border-orange-500/40 hover:text-orange-300"
+                          >
+                            <Disc3 size={13} />
+                          </button>
+                          <button
+                            onClick={() => deleteRelease(album.id)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-400/20 text-red-400/30 transition hover:bg-red-500/10 hover:text-red-300"
+                            title="Elimina"
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </section>
-            ))
-          }
-        </div>
-      )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        );
+      })()}
     </>
   );
 }
