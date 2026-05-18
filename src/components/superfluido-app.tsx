@@ -44,7 +44,7 @@ import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
 
-type View = "home" | "inventory" | "calendar" | "projects" | "distrib" | "press" | "profile" | "vault";
+type View = "home" | "inventory" | "calendar" | "projects" | "distrib" | "profile" | "vault";
 
 type AppUser = {
   id: string;
@@ -72,7 +72,6 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "calendar", label: "Calendario", icon: CalendarDays },
   { id: "projects", label: "Studio Hub", icon: Disc3 },
   { id: "distrib", label: "Distrib", icon: Radio },
-  { id: "press", label: "AI Press Kit", icon: Bot },
   { id: "profile", label: "Profili", icon: UserRound },
   { id: "vault", label: "Vault", icon: FolderOpen },
 ];
@@ -416,10 +415,6 @@ export function SuperfluidoApp() {
         </div>
         <div className={view === "distrib" ? "" : "hidden"}>
           <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />
-        </div>
-        <div className={view === "press" ? "" : "hidden"}>
-          {/* FIX 5: passa user e onToast a PressKit */}
-          <PressKit state={state} user={user} onToast={showToast} />
         </div>
         <div className={view === "profile" ? "" : "hidden"}>
           <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
@@ -767,9 +762,12 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
             Dashboard operativa per studio, release, eventi, merch e press kit. Collegata a Supabase e pronta per Vercel.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <button onClick={() => goTo("press")} className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300">
+            <button
+              onClick={() => document.getElementById("overview-ai-chat")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300"
+            >
               <Sparkles size={18} />
-              Genera Press Kit
+              Chiedi all'AI
             </button>
             <button onClick={() => goTo("projects")} className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white transition hover:border-white/25">
               <FileAudio size={18} />
@@ -805,8 +803,8 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
         <Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" />
       </section>
 
-      {/* Inline AI widget */}
-      <section className="mt-5">
+      {/* Inline AI chat embed */}
+      <section className="mt-5" id="overview-ai-chat">
         <OverviewAIWidget state={state} user={user} onToast={onToast} reload={reload} />
       </section>
 
@@ -991,7 +989,7 @@ async function sendToAI(
   return data;
 }
 
-// ── OverviewAIWidget ──────────────────────────────────────────────────────────
+// ── OverviewAIWidget (embedded ChatGPT-style) ────────────────────────────────
 
 function OverviewAIWidget({
   state,
@@ -1004,90 +1002,147 @@ function OverviewAIWidget({
   onToast: (text: string, kind?: "error" | "success") => void;
   reload: () => Promise<void>;
 }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [response, setResponse] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  async function ask() {
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, aiLoading]);
+
+  async function send() {
     const text = input.trim();
-    if (!text || loading) return;
-    setLoading(true);
+    if (!text || aiLoading) return;
+    const userMsg: ChatMessage = { role: "user", content: text };
+    const nextMessages = [...messages, userMsg];
     setInput("");
+    setMessages(nextMessages);
+    setAiLoading(true);
     try {
-      const data = await sendToAI(
-        [{ role: "user", content: text }],
-        buildAIContext(state),
-        user.id,
-      );
-      setResponse(data.text);
+      const data = await sendToAI(nextMessages, buildAIContext(state), user.id);
+      setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
       if (data.actionPerformed) {
         await reload();
         onToast(data.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
       onToast(e instanceof Error ? e.message : "Errore AI");
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
-      setLoading(false);
+      setAiLoading(false);
     }
   }
 
-  const SUGGESTIONS = [
+  const CHIPS = [
     "Crea un task per il prossimo showcase",
     "Aggiungi un evento in studio per venerdì",
     "Cerca contratti nel Vault",
+    "Cosa abbiamo in lavorazione?",
   ];
 
   return (
-    <div className="glass rounded-md p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <Sparkles size={16} className="text-orange-300" />
+    <div className="glass flex flex-col overflow-hidden rounded-md" style={{ height: 480 }}>
+      {/* Header */}
+      <div className="flex shrink-0 items-center gap-2.5 border-b border-white/8 px-5 py-4">
+        <Sparkles size={15} className="text-orange-300" />
         <p className="font-black text-white">AI Assistant</p>
-        <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
+        {messages.length > 0 && (
+          <button
+            onClick={() => setMessages([])}
+            className="ml-2 text-[11px] text-white/30 transition hover:text-white/60"
+          >
+            Nuova chat
+          </button>
+        )}
+        <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/22">
           Groq · llama-3.3-70b
         </span>
       </div>
 
-      {!response && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              onClick={() => setInput(s)}
-              className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/55 transition hover:border-orange-400/30 hover:text-white/80"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        {messages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center gap-5">
+            <div className="text-center">
+              <Sparkles size={32} className="mx-auto mb-3 text-orange-300/40" />
+              <p className="text-sm font-semibold text-white/40">
+                Posso creare task, aggiungere eventi al calendario,<br />cercare documenti nel Vault e rispondere su SUPERFLUIDO.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {CHIPS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setInput(s)}
+                  className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-xs text-white/55 transition hover:border-orange-400/30 hover:text-white/85"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
-      {response && (
-        <div className="mb-4 rounded-md border border-white/8 bg-white/[0.035] px-4 py-3 text-sm leading-6 text-white/80">
-          {response}
+        {messages.map((msg, i) => (
+          <div key={i} className={`mb-4 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            {msg.role === "assistant" && (
+              <span className="mr-2 mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-500/15">
+                <Sparkles size={11} className="text-orange-300" />
+              </span>
+            )}
+            <div
+              className={`max-w-[75%] rounded-xl px-4 py-2.5 text-sm leading-6 ${
+                msg.role === "user"
+                  ? "rounded-br-sm bg-orange-500/20 text-white"
+                  : "rounded-bl-sm bg-white/[0.06] text-white/85"
+              }`}
+            >
+              {msg.content}
+            </div>
+          </div>
+        ))}
+
+        {aiLoading && (
+          <div className="mb-4 flex justify-start">
+            <span className="mr-2 mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-500/15">
+              <Sparkles size={11} className="text-orange-300" />
+            </span>
+            <div className="rounded-xl rounded-bl-sm bg-white/[0.06] px-4 py-3">
+              <div className="flex gap-1">
+                {[0, 0.15, 0.3].map((d, i) => (
+                  <span
+                    key={i}
+                    className="block h-1.5 w-1.5 animate-bounce rounded-full bg-white/40"
+                    style={{ animationDelay: `${d}s` }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div className="shrink-0 border-t border-white/8 px-5 py-4">
+        <div className="flex items-center gap-2 rounded-xl border border-white/12 bg-white/[0.04] px-4 py-2 focus-within:border-orange-500/40">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
+            placeholder="Scrivi un messaggio…"
+            className="flex-1 bg-transparent text-sm text-white placeholder:text-white/30 focus:outline-none"
+          />
           <button
-            onClick={() => setResponse(null)}
-            className="mt-2 block text-xs text-white/30 hover:text-white/60 transition"
+            onClick={send}
+            disabled={!input.trim() || aiLoading}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-orange-500 text-black transition hover:bg-orange-300 disabled:opacity-35"
           >
-            Nuova domanda
+            <Send size={13} />
           </button>
         </div>
-      )}
-
-      <div className="flex gap-2">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && ask()}
-          placeholder="Crea un task, aggiungi un evento, cerca nel vault…"
-          className="flex-1 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-orange-500/40 focus:outline-none"
-        />
-        <button
-          onClick={ask}
-          disabled={!input.trim() || loading}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-orange-500 text-black transition hover:bg-orange-300 disabled:opacity-40"
-        >
-          {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-        </button>
       </div>
     </div>
   );
