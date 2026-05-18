@@ -26,7 +26,15 @@ export async function POST(request: Request) {
     if (action === "artist_albums") {
       if (!artistId) return Response.json({ error: "artistId mancante" }, { status: 400 });
       const data = await fetchArtistAlbums(artistId);
-      return Response.json({ items: data.items });
+      const items = ((data.items ?? []) as Array<Record<string, unknown>>).map((a) => ({
+        spotify_id: a.id as string,
+        nome_album: a.name as string,
+        release_date: (a.release_date as string) ?? null,
+        cover_url: ((a.images as Array<{ url: string }>)?.[0]?.url) ?? null,
+        link_spotify: ((a.external_urls as Record<string, string>)?.spotify) ?? null,
+        artist_name: ((a.artists as Array<{ name: string }>)?.[0]?.name) ?? "",
+      }));
+      return Response.json({ items });
     }
 
     return Response.json({ error: "Azione non riconosciuta" }, { status: 400 });

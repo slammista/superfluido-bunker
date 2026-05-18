@@ -177,6 +177,26 @@ export function SuperfluidoApp() {
     };
   }, []);
 
+  // Notifiche browser + real-time task subscription
+  useEffect(() => {
+    if (!user) return;
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    const uid = user.id;
+    const channel = getSupabase()
+      .channel(`notif-${uid}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks_kanban" }, (payload) => {
+        const task = payload.new as KanbanTask;
+        if (task.assegnato_a === uid && "Notification" in window && Notification.permission === "granted") {
+          new Notification("Nuovo task assegnato", { body: task.titolo, icon: "/assets/logo_login.png" });
+        }
+        loadWorkspace(uid);
+      })
+      .subscribe();
+    return () => { void getSupabase().removeChannel(channel); };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // FIX 1 + FIX 2: fetchRole wrappato in try-catch
   async function fetchRole(userId: string): Promise<Role | undefined> {
     try {
@@ -382,7 +402,7 @@ export function SuperfluidoApp() {
           <Projects albums={state.albums} tracks={state.tracks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
         </div>
         <div className={view === "distrib" ? "" : "hidden"}>
-          <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
+          <Distrib albums={state.albums} profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />
         </div>
         <div className={view === "press" ? "" : "hidden"}>
           {/* FIX 5: passa user e onToast a PressKit */}
@@ -668,12 +688,28 @@ function ModuleHeader({ title, text, icon: Icon, actions }: { title: string; tex
   );
 }
 
+function trackPhaseBadge(fase: string | null) {
+  const map: Record<string, string> = {
+    Beat: "bg-sky-500/15 text-sky-300",
+    Provini: "bg-purple-500/15 text-purple-300",
+    Demo: "bg-yellow-500/15 text-yellow-300",
+    Mix: "bg-orange-500/15 text-orange-300",
+    Master: "bg-emerald-500/15 text-emerald-300",
+  };
+  return map[fase ?? ""] ?? "bg-white/10 text-white/40";
+}
+
 function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo: (view: View) => void }) {
   const totalStock = state.products.reduce(
     (sum, product) => sum + (product.product_variants ?? []).reduce((variantSum, variant) => variantSum + Number(variant.stock_quantity ?? 0), 0),
     0,
   );
   const lowStock = state.products.filter((product) => (product.product_variants ?? []).some((variant) => Number(variant.stock_quantity) < 6));
+  const upcomingReleases = [...state.albums]
+    .filter((a) => a.release_date && (a.stato === "upcoming" || a.stato === "released"))
+    .sort((a, b) => new Date(a.release_date!).getTime() - new Date(b.release_date!).getTime())
+    .slice(0, 5);
+  const recentTracks = state.tracks.slice(0, 5);
 
   return (
     <>
@@ -808,6 +844,63 @@ function Overview({ state, user, goTo }: { state: AppState; user: AppUser; goTo:
                     </p>
                   </div>
                 ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Release in arrivo + ultime tracce */}
+      <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
+        <div className="glass rounded-md p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Radio size={16} className="text-orange-300" />
+              <p className="font-black text-white">Release con data</p>
+            </div>
+            <button onClick={() => goTo("distrib")} className="text-xs font-semibold text-orange-300 hover:text-orange-200 transition">
+              Vedi tutto →
+            </button>
+          </div>
+          {upcomingReleases.length === 0 ? (
+            <p className="py-3 text-center text-sm text-white/30">Nessuna release con data impostata.</p>
+          ) : (
+            <div className="space-y-2">
+              {upcomingReleases.map((album) => (
+                <div key={album.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                  <Radio size={12} className="shrink-0 text-orange-300/60" />
+                  <p className="flex-1 truncate text-sm font-semibold text-white/80">{album.nome_album}</p>
+                  <p className="shrink-0 font-mono text-[10px] text-white/35">
+                    {new Date(album.release_date!).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="glass rounded-md p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Music size={16} className="text-orange-300" />
+              <p className="font-black text-white">Ultime tracce</p>
+            </div>
+            <button onClick={() => goTo("projects")} className="text-xs font-semibold text-orange-300 hover:text-orange-200 transition">
+              Vedi tutto →
+            </button>
+          </div>
+          {recentTracks.length === 0 ? (
+            <p className="py-3 text-center text-sm text-white/30">Nessuna traccia caricata.</p>
+          ) : (
+            <div className="space-y-2">
+              {recentTracks.map((track) => (
+                <div key={track.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                  <Music size={12} className="shrink-0 text-white/25" />
+                  <p className="flex-1 truncate text-sm font-semibold text-white/80">{track.nome_traccia}</p>
+                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${trackPhaseBadge(track.fase)}`}>
+                    {track.fase ?? "—"}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -2045,16 +2138,29 @@ function Projects({ albums, tracks, user, reload, onToast }: { albums: Album[]; 
 
 type DistribTab = "released" | "upcoming" | "in_progress";
 
+type SpotifyAlbumPreview = {
+  spotify_id: string;
+  nome_album: string;
+  release_date: string | null;
+  cover_url: string | null;
+  link_spotify: string | null;
+  artist_name: string;
+};
+
 function Distrib({
   albums,
+  profiles,
   user,
   reload,
   onToast,
+  goTo,
 }: {
   albums: Album[];
+  profiles: ArtistProfile[];
   user: AppUser;
   reload: () => Promise<void>;
   onToast: (msg: string, kind?: "error" | "success") => void;
+  goTo: (view: View) => void;
 }) {
   const [tab, setTab] = useState<DistribTab>("released");
   const [showForm, setShowForm] = useState(false);
@@ -2071,6 +2177,14 @@ function Distrib({
     spotify_album_id: "",
     spotify_cover_url: "",
   });
+
+  // Import bulk
+  const [showImport, setShowImport] = useState(false);
+  const [extraArtistUrls, setExtraArtistUrls] = useState("");
+  const [importItems, setImportItems] = useState<SpotifyAlbumPreview[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingImport, setLoadingImport] = useState(false);
+  const [importingBulk, setImportingBulk] = useState(false);
 
   async function autoFillFromSpotify() {
     if (!spotifyUrl.trim()) return;
@@ -2101,12 +2215,91 @@ function Distrib({
     }
   }
 
+  async function loadImportItems() {
+    setLoadingImport(true);
+    setImportItems([]);
+    setSelectedIds(new Set());
+    try {
+      // Collect artist IDs: from profiles + extra textarea
+      const profileUrls = profiles.map((p) => p.link_spotify).filter(Boolean) as string[];
+      const extraLines = extraArtistUrls.split(/\n|,/).map((s) => s.trim()).filter(Boolean);
+      const allUrls = [...profileUrls, ...extraLines];
+      if (allUrls.length === 0) { onToast("Aggiungi almeno un profilo Spotify negli Artisti o incolla un URL qui sotto."); setLoadingImport(false); return; }
+
+      // Extract artist IDs
+      const artistIds = allUrls
+        .map((url) => url.match(/spotify\.com\/artist\/([A-Za-z0-9]+)/)?.[1] ?? url.match(/^([A-Za-z0-9]{22})$/)?.[1])
+        .filter(Boolean) as string[];
+
+      if (artistIds.length === 0) { onToast("Nessun ID artista valido trovato. Usa URL Spotify (open.spotify.com/artist/...)."); setLoadingImport(false); return; }
+
+      // Fetch albums for each artist
+      const results = await Promise.allSettled(
+        artistIds.map((id) =>
+          fetch("/api/spotify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "artist_albums", artistId: id }) })
+            .then((r) => r.json() as Promise<{ items?: SpotifyAlbumPreview[]; error?: string }>)
+        )
+      );
+
+      const allItems: SpotifyAlbumPreview[] = [];
+      const seen = new Set<string>();
+      for (const r of results) {
+        if (r.status === "fulfilled" && r.value.items) {
+          for (const item of r.value.items) {
+            if (!seen.has(item.spotify_id)) { seen.add(item.spotify_id); allItems.push(item); }
+          }
+        }
+      }
+
+      // Filter out already-imported albums (by spotify_album_id)
+      const existingIds = new Set(albums.map((a) => a.spotify_album_id).filter(Boolean));
+      const newItems = allItems.filter((i) => !existingIds.has(i.spotify_id));
+      newItems.sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? ""));
+
+      setImportItems(newItems);
+      setSelectedIds(new Set(newItems.map((i) => i.spotify_id)));
+      if (newItems.length === 0) onToast("Tutti gli album trovati sono già presenti nel catalogo.", "success");
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Errore caricamento");
+    } finally {
+      setLoadingImport(false);
+    }
+  }
+
+  async function bulkImport() {
+    const toImport = importItems.filter((i) => selectedIds.has(i.spotify_id));
+    if (toImport.length === 0) { onToast("Seleziona almeno un album."); return; }
+    setImportingBulk(true);
+    try {
+      const rows = toImport.map((item) => ({
+        creato_da: user.id,
+        nome_album: item.nome_album,
+        release_date: item.release_date ?? null,
+        stato: "released",
+        link_spotify: item.link_spotify ?? null,
+        spotify_album_id: item.spotify_id,
+        cover_image_url: item.cover_url ?? null,
+      }));
+      const { error } = await getSupabase().from("album_progetti").insert(rows);
+      if (error) throw error;
+      onToast(`${toImport.length} album importati.`, "success");
+      await reload();
+      setShowImport(false);
+      setImportItems([]);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Errore importazione");
+    } finally {
+      setImportingBulk(false);
+    }
+  }
+
   async function saveRelease(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!form.nome_album.trim()) { onToast("Il nome è obbligatorio."); return; }
     setSaving(true);
     try {
-      const { error } = await getSupabase().from("album_progetti").insert({
+      const supabase = getSupabase();
+      const { error } = await supabase.from("album_progetti").insert({
         creato_da: user.id,
         nome_album: form.nome_album.trim(),
         release_date: form.release_date || null,
@@ -2118,7 +2311,19 @@ function Distrib({
         cover_image_url: form.spotify_cover_url || null,
       });
       if (error) throw error;
-      onToast("Release aggiunta.", "success");
+
+      // Auto-crea evento in calendario se release_date è impostata
+      if (form.release_date) {
+        await supabase.from("eventi_calendario").insert({
+          creato_da: user.id,
+          titolo: `Release: ${form.nome_album.trim()}`,
+          tipo_evento: "Release",
+          data_evento: new Date(form.release_date).toISOString(),
+          colore: "#ff6b35",
+        });
+      }
+
+      onToast("Release aggiunta." + (form.release_date ? " Evento calendario creato." : ""), "success");
       await reload();
       setShowForm(false);
       setSpotifyUrl("");
@@ -2155,7 +2360,7 @@ function Distrib({
     <>
       <ModuleHeader title="Distrib" text="Gestione release: uscite, in arrivo e in lavorazione." icon={Radio} />
 
-      {/* Tabs + add button */}
+      {/* Tabs + buttons */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1 rounded-md border border-white/10 bg-white/[0.035] p-1">
           {TABS.map((t) => (
@@ -2171,13 +2376,100 @@ function Distrib({
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400"
-        >
-          <Plus size={16} /> Aggiungi release
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setShowImport(!showImport); setShowForm(false); }}
+            className="inline-flex items-center gap-2 rounded-md border border-orange-500/40 px-4 py-2 text-sm font-bold text-orange-300 transition hover:bg-orange-500/10"
+          >
+            <Download size={15} /> Importa da Spotify
+          </button>
+          <button
+            onClick={() => { setShowForm(!showForm); setShowImport(false); }}
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400"
+          >
+            <Plus size={16} /> Aggiungi
+          </button>
+        </div>
       </div>
+
+      {/* Import panel */}
+      {showImport && (
+        <div className="glass mb-6 rounded-md p-5">
+          <p className="mb-1 text-sm font-bold text-white">Importa discografia da Spotify</p>
+          <p className="mb-4 text-xs text-white/40">
+            Legge i link Spotify dai profili artisti. Puoi aggiungere altri URL artisti sotto (uno per riga).
+          </p>
+          <div className="mb-3">
+            <p className="mb-1 text-xs text-white/50">Profili con Spotify collegato:</p>
+            {profiles.filter((p) => p.link_spotify).length === 0 ? (
+              <p className="text-xs text-orange-300">Nessun profilo ha ancora un link Spotify. Aggiungili in Profili.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {profiles.filter((p) => p.link_spotify).map((p) => (
+                  <span key={p.user_id} className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">{p.nome_arte ?? p.user_id}</span>
+                ))}
+              </div>
+            )}
+          </div>
+          <textarea
+            className="field mb-3 w-full rounded-md px-3 py-2 text-sm"
+            rows={3}
+            placeholder="URL artisti extra (uno per riga): open.spotify.com/artist/..."
+            value={extraArtistUrls}
+            onChange={(e) => setExtraArtistUrls(e.target.value)}
+          />
+          <button
+            onClick={loadImportItems}
+            disabled={loadingImport}
+            className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400 disabled:opacity-40"
+          >
+            {loadingImport ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+            {loadingImport ? "Caricamento..." : "Carica albums"}
+          </button>
+
+          {importItems.length > 0 && (
+            <div className="mt-5">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-bold text-white">{importItems.length} nuovi album trovati</p>
+                <div className="flex gap-2 text-xs">
+                  <button onClick={() => setSelectedIds(new Set(importItems.map((i) => i.spotify_id)))} className="text-orange-300 hover:text-white">Seleziona tutti</button>
+                  <span className="text-white/20">|</span>
+                  <button onClick={() => setSelectedIds(new Set())} className="text-white/40 hover:text-white">Deseleziona</button>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-96 overflow-y-auto pr-1">
+                {importItems.map((item) => (
+                  <label key={item.spotify_id} className={`glass flex cursor-pointer items-center gap-3 rounded-md p-3 transition ${selectedIds.has(item.spotify_id) ? "border border-orange-500/40" : "opacity-50"}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.spotify_id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedIds);
+                        e.target.checked ? next.add(item.spotify_id) : next.delete(item.spotify_id);
+                        setSelectedIds(next);
+                      }}
+                      className="accent-orange-500"
+                    />
+                    {item.cover_url && <Image src={item.cover_url} alt="" width={40} height={40} className="shrink-0 rounded object-cover" unoptimized />}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{item.nome_album}</p>
+                      <p className="text-xs text-white/40">{item.artist_name} · {item.release_date?.slice(0, 4) ?? "—"}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <button
+                onClick={bulkImport}
+                disabled={importingBulk || selectedIds.size === 0}
+                className="mt-4 inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400 disabled:opacity-40"
+              >
+                {importingBulk ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                Importa {selectedIds.size} album selezionati
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Form */}
       {showForm && (
@@ -2350,22 +2642,29 @@ function Distrib({
                     )}
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between">
+                  <div className="mt-3 flex items-center gap-2">
                     <select
                       value={album.stato ?? "in_progress"}
                       onChange={(e) => updateStato(album.id, e.target.value)}
-                      className="field rounded px-2 py-1 text-xs"
+                      className="field flex-1 rounded px-2 py-1 text-xs"
                     >
                       <option value="in_progress">In Lavorazione</option>
                       <option value="upcoming">In Arrivo</option>
                       <option value="released">Uscito</option>
                     </select>
                     <button
+                      onClick={() => goTo("projects")}
+                      title="Vedi in Studio Hub"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-white/10 text-white/30 transition hover:border-orange-500/40 hover:text-orange-300"
+                    >
+                      <Disc3 size={13} />
+                    </button>
+                    <button
                       onClick={() => deleteRelease(album.id)}
-                      className="rounded p-1 text-white/30 transition hover:text-red-400"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-400/20 text-red-400/30 transition hover:bg-red-500/10 hover:text-red-300"
                       title="Elimina"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 </div>
@@ -2814,18 +3113,21 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
   }
 
   function navigate(folderId: string, folderName: string) {
+    setSearch(""); // Bug 1 fix: reset search on folder entry
     setCurrentFolderId(folderId);
     setBreadcrumb([...breadcrumb, { id: folderId, name: folderName }]);
   }
 
   function goBack() {
     if (breadcrumb.length <= 1) return;
+    setSearch("");
     const newBreadcrumb = breadcrumb.slice(0, -1);
     setBreadcrumb(newBreadcrumb);
     setCurrentFolderId(newBreadcrumb[newBreadcrumb.length - 1].id);
   }
 
   function goHome() {
+    setSearch("");
     setBreadcrumb([{ id: null, name: "Drive" }]);
     setCurrentFolderId(null);
   }
@@ -2870,6 +3172,10 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
   }
 
   const isFolder = (mimeType: string) => mimeType === "application/vnd.google-apps.folder";
+  // Google Workspace native files (Docs, Sheets, Slides, Shortcuts, etc.) cannot be
+  // downloaded via alt=media — only binary files can. Show "Open in Drive" instead.
+  const isGoogleNative = (mimeType: string) =>
+    mimeType.startsWith("application/vnd.google-apps.") && !isFolder(mimeType);
   const displayItems = search.trim()
     ? items.filter((i) => i.name.toLowerCase().includes(search.toLowerCase()))
     : items;
@@ -2950,9 +3256,30 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
                 </div>
                 <div className="ml-2 flex shrink-0 gap-1">
                   {!isFolder(item.mimeType) && (
-                    <a href={`/api/drive/file/${item.id}?name=${encodeURIComponent(item.name)}`} className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300">
-                      <Download size={14} />
-                    </a>
+                    isGoogleNative(item.mimeType) ? (
+                      // Google Workspace files (Docs, Sheets, Shortcuts…) — open in Drive, not download
+                      <a
+                        href={item.webViewLink ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300"
+                        title="Apri in Drive"
+                      >
+                        <ExternalLink size={14} />
+                      </a>
+                    ) : (
+                      // Binary files — proxy download
+                      <a
+                        href={`/api/drive/file/${item.id}?name=${encodeURIComponent(item.name)}`}
+                        download={item.name}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300"
+                        title="Scarica"
+                      >
+                        <Download size={14} />
+                      </a>
+                    )
                   )}
                   <button onClick={() => setRenaming(item.id)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300">
                     <Pencil size={14} />
