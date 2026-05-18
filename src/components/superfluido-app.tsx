@@ -1059,7 +1059,7 @@ function OverviewAIWidget({
           </button>
         )}
         <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/22">
-          Groq · llama-3.3-70b
+          Gemini
         </span>
       </div>
 
