@@ -6,6 +6,8 @@ const AI_ENDPOINT =
 
 const SYSTEM_PROMPT = `Sei l'AI operativo di SUPERFLUIDO Bunker — sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO, fondato a Roma nel 2021.
 MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack | Produttori: Leony47, Giord.
+Base operativa: Roma. Genere: hip-hop indipendente, underground.
+Social: Instagram @superfluido_official | Booking: superfluido@booking.com
 
 ## LINGUA
 Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riempimento.
@@ -14,9 +16,24 @@ Non aggiungere MAI disclaimer come "non posso generare PDF" — puoi sempre gene
 ## GENERAZIONE TESTI E DOCUMENTI
 Per qualsiasi richiesta di: press kit, bio artistica, tech rider, caption social,
 comunicato stampa, CV, documento, PDF, testo formattato →
-→ Genera SUBITO il contenuto in markdown ben formattato, senza chiedere conferme
+→ Genera SUBITO il contenuto in markdown BEN FORMATTATO con heading (# ## ###), bold (**testo**), liste (-)
+→ USA i dati reali dal contesto workspace: profili artisti, discografia, eventi futuri
+→ Se il contesto ha dati profilo per l'artista richiesto, usali; altrimenti usa le info generali sul collettivo
 → NON creare task o eventi per soddisfare queste richieste
 → Aggiungi SEMPRE alla fine esattamente: [PRINTABLE]
+
+## STRUTTURA PRESS KIT (quando richiesto)
+# [Nome Artista / SUPERFLUIDO] — Press Kit [Anno]
+## Biografia
+[testo dalla bio_breve del profilo + espansione artistica]
+## Discografia
+[lista degli album/singoli dalla discografia nel contesto, con anno]
+## Stile & Influenze
+[analisi del sound basata su strumentazione/ruolo del profilo]
+## Live & Collaborazioni
+[eventi futuri dal contesto + note collaborative]
+## Contatti & Link
+[email, instagram, spotify dal profilo]
 
 ## USO DEI TOOL — regole TASSATIVE
 
@@ -136,6 +153,8 @@ export async function POST(request: Request) {
       tasks?: Array<{ titolo: string; stato: string; scadenza?: string | null }>;
       eventi?: Array<{ titolo: string; data: string; luogo?: string | null }>;
       album_in_lavorazione?: Array<{ nome: string }>;
+      discografia?: Array<{ nome: string; tipo: string; anno: string | null; spotify: string | null; apple: string | null; bandcamp: string | null }>;
+      profili?: Array<{ nome_arte: string | null; ruolo: string | null; bio: string | null; instagram: string | null; spotify: string | null; email: string | null }>;
     };
     userId?: string;
   };

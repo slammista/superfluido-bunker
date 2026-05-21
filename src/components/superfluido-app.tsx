@@ -986,7 +986,110 @@ function buildAIContext(state: AppState) {
     album_in_lavorazione: state.albums
       .filter((a) => !a.stato || a.stato === "in_progress")
       .map((a) => ({ nome: a.nome_album })),
+    discografia: state.albums
+      .filter((a) => a.stato === "released")
+      .slice(0, 30)
+      .map((a) => ({
+        nome: a.nome_album,
+        tipo: a.tipo_release ?? "album",
+        anno: a.release_date?.slice(0, 4) ?? null,
+        spotify: a.link_spotify ?? null,
+        apple: a.link_apple ?? null,
+        bandcamp: a.link_bandcamp ?? null,
+      })),
+    profili: state.profiles.map((p) => ({
+      nome_arte: p.nome_arte,
+      ruolo: p.strumentazione,
+      bio: p.bio_breve,
+      instagram: p.link_instagram,
+      spotify: p.link_spotify,
+      email: p.email_contatto,
+    })),
   };
+}
+
+// ── Markdown → HTML (no deps) ─────────────────────────────────────────────────
+
+function escHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function inlineMd(s: string) {
+  return escHtml(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>");
+}
+
+function markdownToHtml(md: string): string {
+  const lines = md.split("\n");
+  const out: string[] = [];
+  let inUl = false;
+  const closeList = () => { if (inUl) { out.push("</ul>"); inUl = false; } };
+  for (const raw of lines) {
+    const t = raw.trimEnd();
+    if (t.startsWith("### "))     { closeList(); out.push(`<h3>${inlineMd(t.slice(4))}</h3>`); }
+    else if (t.startsWith("## ")) { closeList(); out.push(`<h2>${inlineMd(t.slice(3))}</h2>`); }
+    else if (t.startsWith("# "))  { closeList(); out.push(`<h1>${inlineMd(t.slice(2))}</h1>`); }
+    else if (/^[*-] /.test(t))    { if (!inUl) { out.push("<ul>"); inUl = true; } out.push(`<li>${inlineMd(t.slice(2))}</li>`); }
+    else if (t === "")             { closeList(); out.push(""); }
+    else                           { closeList(); out.push(`<p>${inlineMd(t)}</p>`); }
+  }
+  closeList();
+  return out.join("\n");
+}
+
+// ── PrintPreviewModal ─────────────────────────────────────────────────────────
+
+function PrintPreviewModal({ content, onClose }: { content: string; onClose: () => void }) {
+  const html = markdownToHtml(content);
+
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.id = "sf-print-style";
+    style.textContent = `
+      .sf-prose { font-family: Georgia, "Times New Roman", serif; color: #111; line-height: 1.8; }
+      .sf-prose h1 { font-size: 1.9rem; font-weight: 900; font-family: Arial, sans-serif; border-bottom: 3px solid #111; padding-bottom: 0.4em; margin: 0 0 1em; }
+      .sf-prose h2 { font-size: 1.2rem; font-weight: 700; font-family: Arial, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; margin: 2em 0 0.7em; color: #333; }
+      .sf-prose h3 { font-size: 1rem; font-weight: 700; font-family: Arial, sans-serif; margin: 1.5em 0 0.5em; }
+      .sf-prose p  { margin: 0.7em 0; }
+      .sf-prose ul { padding-left: 1.6em; margin: 0.7em 0; }
+      .sf-prose li { margin: 0.35em 0; }
+      .sf-prose strong { font-weight: 700; }
+      .sf-prose em { font-style: italic; }
+      .sf-prose code { background: #f0f0f0; padding: 0.15em 0.4em; border-radius: 3px; font-family: monospace; font-size: 0.88em; }
+      @media print {
+        body > *:not(#sf-print-modal) { display: none !important; }
+        #sf-print-modal { position: static !important; overflow: visible !important; background: white !important; }
+        #sf-print-controls { display: none !important; }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => document.getElementById("sf-print-style")?.remove();
+  }, []);
+
+  return (
+    <div id="sf-print-modal" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
+      <div className="mx-auto max-w-2xl px-8 py-8">
+        <div id="sf-print-controls" className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
+          <button
+            onClick={() => window.print()}
+            className="rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
+          >
+            Stampa / Salva PDF
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-5 py-2.5 text-sm text-gray-700 hover:bg-gray-100"
+          >
+            Chiudi
+          </button>
+          <span className="text-xs text-gray-400">Su mobile: Stampa → Salva come PDF</span>
+        </div>
+        <div className="sf-prose" dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
+    </div>
+  );
 }
 
 async function sendToAI(
@@ -1020,6 +1123,7 @@ function OverviewAIWidget({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [printContent, setPrintContent] = useState<string | null>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1122,14 +1226,7 @@ function OverviewAIWidget({
               </div>
               {msg.printable && (
                 <button
-                  onClick={() => {
-                    const w = window.open("", "_blank");
-                    if (w) {
-                      w.document.write(`<html><head><title>Documento</title><style>body{font-family:sans-serif;max-width:700px;margin:40px auto;line-height:1.6}h1,h2,h3{margin-top:1.5em}pre{background:#f5f5f5;padding:12px;border-radius:4px}</style></head><body><pre>${msg.content.replace(/</g, "&lt;")}</pre></body></html>`);
-                      w.document.close();
-                      w.print();
-                    }
-                  }}
+                  onClick={() => setPrintContent(msg.content)}
                   className="self-start rounded-md border border-white/15 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition hover:border-orange-400/30 hover:text-white/80"
                 >
                   <Download size={11} className="mr-1.5 inline" />
@@ -1180,6 +1277,10 @@ function OverviewAIWidget({
           </button>
         </div>
       </div>
+
+      {printContent !== null && (
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+      )}
     </div>
   );
 }
@@ -1206,6 +1307,7 @@ function AIChatPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [printContent, setPrintContent] = useState<string | null>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1296,14 +1398,7 @@ function AIChatPanel({
             </div>
             {msg.printable && (
               <button
-                onClick={() => {
-                  const w = window.open("", "_blank");
-                  if (w) {
-                    w.document.write(`<html><head><title>Documento</title><style>body{font-family:sans-serif;max-width:700px;margin:40px auto;line-height:1.6}h1,h2,h3{margin-top:1.5em}pre{background:#f5f5f5;padding:12px;border-radius:4px}</style></head><body><pre>${msg.content.replace(/</g, "&lt;")}</pre></body></html>`);
-                    w.document.close();
-                    w.print();
-                  }
-                }}
+                onClick={() => setPrintContent(msg.content)}
                 className="mt-1.5 rounded-md border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-white/50 transition hover:border-orange-400/30 hover:text-white/75"
               >
                 <Download size={10} className="mr-1 inline" />
@@ -1358,6 +1453,10 @@ function AIChatPanel({
           </button>
         </div>
       </div>
+
+      {printContent !== null && (
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+      )}
     </div>
   );
 }
