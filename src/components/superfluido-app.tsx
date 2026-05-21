@@ -302,8 +302,10 @@ export function SuperfluidoApp() {
     setLoading(true);
     setNotice(null);
     try {
+      const origin = process.env.NEXT_PUBLIC_SITE_URL ??
+        (typeof window !== "undefined" ? window.location.origin : "");
       const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
-        redirectTo: typeof window !== "undefined" ? window.location.origin : "",
+        redirectTo: origin,
       });
       if (error) throw error;
       setNotice("Email inviata! Controlla la tua casella e clicca il link.");
@@ -364,17 +366,12 @@ export function SuperfluidoApp() {
           <UserMenu user={user} onLogout={handleLogout} onPasswordReset={handleResetPassword} />
         </div>
 
-        <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 pb-3 xl:hidden">
-          {navItems.map((item) => (
-            <NavButton key={item.id} active={view === item.id} item={item} onClick={() => setView(item.id)} compact />
-          ))}
-        </nav>
       </header>
 
       {/* Toast globale */}
       {toast && (
         <div
-          className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-semibold shadow-xl transition ${
+          className={`fixed bottom-20 right-4 z-50 flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-semibold shadow-xl transition xl:bottom-6 xl:right-6 ${
             toast.kind === "success"
               ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-100"
               : "border-red-400/30 bg-red-500/15 text-red-100"
@@ -388,7 +385,7 @@ export function SuperfluidoApp() {
         </div>
       )}
 
-      <section className={`mx-auto max-w-7xl px-4 py-6 lg:py-8 ${playingTrack ? "pb-28" : ""}`}>
+      <section className={`mx-auto max-w-7xl px-4 py-6 lg:py-8 ${playingTrack ? "pb-[136px] xl:pb-28" : "pb-16 xl:pb-0"}`}>
         {notice ? <Notice text={notice} /> : null}
 
         <div className={view === "home" ? "" : "hidden"}>
@@ -438,7 +435,7 @@ export function SuperfluidoApp() {
       {/* Floating AI chat button */}
       <button
         onClick={() => setChatOpen((o) => !o)}
-        className={`fixed right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 ${playingTrack ? "bottom-[88px]" : "bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
+        className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
         title="AI Assistant"
       >
         <Sparkles size={22} />
@@ -454,6 +451,24 @@ export function SuperfluidoApp() {
         reload={() => loadWorkspace(user.id)}
         playerActive={!!playingTrack}
       />
+
+      {/* Mobile bottom navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-stretch border-t border-white/10 bg-[#0a0a0a]/96 backdrop-blur-xl xl:hidden">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const active = view === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setView(item.id)}
+              className={`flex flex-1 flex-col items-center justify-center gap-0.5 transition ${active ? "text-orange-400" : "text-white/35 hover:text-white/70"}`}
+            >
+              <Icon size={19} />
+              <span className="text-[9px] font-semibold tracking-wide leading-none">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </main>
   );
 }
@@ -1046,7 +1061,7 @@ function OverviewAIWidget({
   ];
 
   return (
-    <div className="glass flex flex-col overflow-hidden rounded-md" style={{ height: 480 }}>
+    <div className="glass flex h-[340px] flex-col overflow-hidden rounded-md sm:h-[480px]">
       {/* Header */}
       <div className="flex shrink-0 items-center gap-2.5 border-b border-white/8 px-5 py-4">
         <Sparkles size={15} className="text-orange-300" />
@@ -1233,7 +1248,7 @@ function AIChatPanel({
 
   return (
     <div
-      className={`fixed inset-y-0 right-0 z-40 flex w-[360px] flex-col border-l border-white/10 bg-[#0a0a0a] shadow-2xl transition-transform duration-300 ${open ? "translate-x-0" : "translate-x-full"} ${playerActive ? "pb-[72px]" : ""}`}
+      className={`fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-white/10 bg-[#0a0a0a] shadow-2xl transition-transform duration-300 xl:w-[360px] ${open ? "translate-x-0" : "translate-x-full"} ${playerActive ? "pb-[136px] xl:pb-[72px]" : "pb-16 xl:pb-0"}`}
     >
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3">
@@ -1981,7 +1996,7 @@ function NowPlayingBar({
         onLoadedMetadata={() => setDur(audioRef.current?.duration ?? 0)}
         onEnded={goNext}
       />
-      <div className="fixed bottom-0 left-0 right-0 z-50 flex h-[72px] items-center gap-3 border-t border-white/8 bg-[#0c0c0c]/96 px-4 backdrop-blur-xl">
+      <div className="fixed bottom-16 left-0 right-0 z-50 flex h-[72px] items-center gap-3 border-t border-white/8 bg-[#0c0c0c]/96 px-4 backdrop-blur-xl xl:bottom-0">
         {/* Thumbnail */}
         <div className={`relative h-11 w-11 shrink-0 overflow-hidden rounded ${album ? `bg-gradient-to-br ${albumGradient(album.id)}` : "bg-white/10"} flex items-center justify-center`}>
           {album?.cover_image_url ? (
