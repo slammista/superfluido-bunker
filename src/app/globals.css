@@ -79,3 +79,17 @@ button {
 .metric-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
+
+@keyframes wavebar {
+  0%, 100% { transform: scaleY(0.4); }
+  50%       { transform: scaleY(1); }
+}
+
+.wave-bar {
+  animation: wavebar 0.8s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+header.scrolled {
+  box-shadow: 0 4px 40px rgba(0, 0, 0, 0.55);
+}

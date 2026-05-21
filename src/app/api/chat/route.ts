@@ -62,6 +62,31 @@ Se non sei sicuro se usare un tool, NON usarlo — rispondi con testo.
 Se un tool restituisce un messaggio che inizia con "Errore:", comunicalo chiaramente
 all'utente invece di dire che l'operazione è riuscita.`;
 
+function textToSSEStream(
+  text: string,
+  meta: { printable: boolean; actionPerformed: boolean; actionMessage: string },
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      const words = text.split(" ");
+      let i = 0;
+      function push() {
+        if (i >= words.length) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", ...meta })}\n\n`));
+          controller.close();
+          return;
+        }
+        const chunk = words.slice(i, i + 3).join(" ") + " ";
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "chunk", text: chunk })}\n\n`));
+        i += 3;
+        setTimeout(push, 18);
+      }
+      push();
+    },
+  });
+}
+
 const tools = [
   {
     type: "function",
@@ -206,6 +231,17 @@ export async function POST(request: Request) {
     return res.json();
   }
 
+  async function callAIStreamRaw(msgs: AIMessage[]) {
+    const payload = { model, temperature: 0.6, max_tokens: 1200, messages: msgs, stream: true };
+    const res = await fetch(AI_ENDPOINT, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) { const err = await res.text(); throw new Error(`Google AI ${res.status}: ${err}`); }
+    return res;
+  }
+
   try {
     const first = await callAI(messages, true);
     const choice = first.choices?.[0];
@@ -293,17 +329,64 @@ export async function POST(request: Request) {
       const second = await callAI([...messages, assistantMsg, ...toolResults], false);
       const text = second.choices?.[0]?.message?.content ?? "";
 
-      return NextResponse.json({ text, actionPerformed, actionMessage });
+      const printable = text.includes("[PRINTABLE]");
+      const cleanText = text.replace("[PRINTABLE]", "").trimEnd();
+      return new Response(
+        textToSSEStream(cleanText, { printable, actionPerformed, actionMessage }),
+        { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" } },
+      );
     }
 
-    // ── Normal text response ──────────────────────────────────────────────────
-    const text = choice?.message?.content ?? "";
-
-    // Detect printable content (press kit, bio, etc.)
-    const printable = text.includes("[PRINTABLE]");
-    const cleanText = text.replace("[PRINTABLE]", "").trimEnd();
-
-    return NextResponse.json({ text: cleanText, actionPerformed: false, printable });
+    // ── Normal text response — streaming ────────────────────────────────────
+    const streamRes = await callAIStreamRaw(messages);
+    const encoder = new TextEncoder();
+    let sseBuffer = "";
+    let fullText = "";
+    const transformedStream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const reader = streamRes.body!.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split("\n");
+          sseBuffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") {
+              const printable = fullText.includes("[PRINTABLE]");
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "" })}\n\n`),
+              );
+              controller.close();
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
+              const chunk = parsed.choices?.[0]?.delta?.content ?? "";
+              if (chunk) {
+                fullText += chunk;
+                const chunkToSend = chunk.replace("[PRINTABLE]", "");
+                if (chunkToSend) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "chunk", text: chunkToSend })}\n\n`));
+                }
+              }
+            } catch { /* non-JSON line */ }
+          }
+        }
+        // Fallback if [DONE] never arrives
+        const printable = fullText.includes("[PRINTABLE]");
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "" })}\n\n`),
+        );
+        controller.close();
+      },
+    });
+    return new Response(transformedStream, {
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Errore sconosciuto";
     return NextResponse.json({ error: msg }, { status: 500 });
