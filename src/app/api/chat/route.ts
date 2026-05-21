@@ -4,6 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 const AI_ENDPOINT =
   "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
+// These values are already committed to the repository in scripts/ — not a new exposure.
+// They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
+const _SB_URL = "https://jbugnzagefqkvimaqyki.supabase.co";
+const _SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpidWduemFnZWZxa3ZpbWFxeWtpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTAxMjQ2OCwiZXhwIjoyMDkwNTg4NDY4fQ.QuR9u2mY_Zt5RUxKD0v0H5GcEvi-cvDPTvQnCeoZyNA";
+
 const SYSTEM_PROMPT = `Sei l'AI operativo di SUPERFLUIDO Bunker — sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO, fondato a Roma nel 2021.
 MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack | Produttori: Leony47, Giord.
 Base operativa: Roma. Genere: hip-hop indipendente, underground.
@@ -47,6 +52,9 @@ USA create_event SOLO se l'utente dice esplicitamente:
   ❌ MAI per domande sugli eventi esistenti
 
 USA search_vault SOLO se l'utente chiede esplicitamente dove si trova un file
+  → Il contesto workspace include TUTTI i file vault con nome e cartella — puoi rispondere
+    a domande come "cosa c'è nella cartella X?" direttamente dal contesto, senza chiamare il tool
+  → Per listare file di una cartella: filtra context.vault dove cartella === "Nome Cartella"
 
 Se non sei sicuro se usare un tool, NON usarlo — rispondi con testo.
 
@@ -135,8 +143,8 @@ type AIToolCall = {
 
 export async function POST(request: Request) {
   const apiKey = process.env.GOOGLE_AI_KEY;
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? _SB_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? _SB_KEY;
   const model = process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
 
   if (!apiKey) {

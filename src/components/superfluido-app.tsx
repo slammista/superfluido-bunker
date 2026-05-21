@@ -1359,7 +1359,16 @@ function AIChatPanel({
         <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
           Gemini
         </span>
-        <button onClick={onClose} className="ml-1 text-white/35 transition hover:text-white">
+        {messages.length > 0 && (
+          <button
+            onClick={() => setMessages([])}
+            className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] font-semibold text-white/40 transition hover:border-orange-500/40 hover:text-orange-300"
+          >
+            <Plus size={11} />
+            Nuova
+          </button>
+        )}
+        <button onClick={onClose} className="text-white/35 transition hover:text-white">
           <X size={15} />
         </button>
       </div>
@@ -1428,14 +1437,6 @@ function AIChatPanel({
 
       {/* Input */}
       <div className="shrink-0 border-t border-white/10 p-3">
-        {messages.length > 0 && (
-          <button
-            onClick={() => setMessages([])}
-            className="mb-2 text-[11px] text-white/25 transition hover:text-white/50"
-          >
-            Nuova conversazione
-          </button>
-        )}
         <div className="flex gap-2">
           <input
             value={input}
