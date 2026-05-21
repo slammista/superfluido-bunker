@@ -1495,7 +1495,41 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
             <Search size={18} className="text-white/40" />
             <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
-          <div className="overflow-x-auto">
+
+          {/* Mobile card list */}
+          <div className="space-y-3 lg:hidden">
+            {filtered.length === 0 && <p className="py-10 text-center text-sm text-white/40">Nessun prodotto trovato.</p>}
+            {filtered.map((product) => {
+              const stock = (product.product_variants ?? []).reduce((sum, v) => sum + Number(v.stock_quantity ?? 0), 0);
+              return (
+                <div key={product.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.03] p-3">
+                  {product.image_url ? (
+                    <Image src={product.image_url} alt={product.name} width={48} height={48} className="h-12 w-12 shrink-0 rounded object-cover" />
+                  ) : (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-white/10 bg-white/5">
+                      <Package size={18} className="text-white/20" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold text-white">{product.name}</p>
+                    <p className="text-xs text-white/45">{product.category ?? "Generale"} · {formatEuro(product.base_price_sell)}</p>
+                  </div>
+                  <span className={`shrink-0 font-mono text-sm font-black ${stock < 6 ? "text-red-300" : "text-emerald-300"}`}>{stock}</span>
+                  <div className="flex shrink-0 gap-1">
+                    <button onClick={() => setEditingProduct(product)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-white/40 hover:bg-white/8 hover:text-white">
+                      <Pencil size={13} />
+                    </button>
+                    <button onClick={() => deleteProduct(product)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden overflow-x-auto lg:block">
             <table className="w-full min-w-[760px] border-collapse text-left text-sm">
               <thead className="text-xs uppercase tracking-[0.16em] text-white/38">
                 <tr>
@@ -2000,7 +2034,7 @@ function NowPlayingBar({
         {/* Thumbnail */}
         <div className={`relative h-11 w-11 shrink-0 overflow-hidden rounded ${album ? `bg-gradient-to-br ${albumGradient(album.id)}` : "bg-white/10"} flex items-center justify-center`}>
           {album?.cover_image_url ? (
-            <Image src={album.cover_image_url} alt="" fill className="object-cover" />
+            <Image src={album.cover_image_url} alt="" fill className="object-cover" unoptimized />
           ) : (
             <Music size={16} className="text-white/30" />
           )}
@@ -2274,9 +2308,9 @@ function Projects({
         <div className="glass mb-5 flex flex-col gap-5 rounded-md p-5 sm:flex-row sm:items-center">
           {/* Cover con upload al click */}
           <label className="group relative h-24 w-24 shrink-0 cursor-pointer overflow-hidden rounded-md">
-            <div className={`h-full w-full bg-gradient-to-br ${albumGradient(selectedAlbum.id)} flex items-center justify-center`}>
+            <div className={`relative h-full w-full bg-gradient-to-br ${albumGradient(selectedAlbum.id)} flex items-center justify-center`}>
               {selectedAlbum.cover_image_url ? (
-                <Image src={selectedAlbum.cover_image_url} alt={selectedAlbum.nome_album} fill className="object-cover" />
+                <Image src={selectedAlbum.cover_image_url} alt={selectedAlbum.nome_album} fill className="object-cover" unoptimized />
               ) : (
                 <Music size={32} className="text-white/40" />
               )}
@@ -2525,7 +2559,7 @@ function Projects({
               >
                 <div className={`relative h-40 bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
                   {album.cover_image_url ? (
-                    <Image src={album.cover_image_url} alt={album.nome_album} fill className="object-cover" />
+                    <Image src={album.cover_image_url} alt={album.nome_album} fill className="object-cover" unoptimized />
                   ) : (
                     <Music size={40} className="text-white/20" />
                   )}
@@ -3502,7 +3536,6 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [breadcrumb, setBreadcrumb] = useState<{ id: string | null; name: string }[]>([{ id: null, name: "Drive" }]);
-  const [renaming, setRenaming] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [search, setSearch] = useState("");
@@ -3562,30 +3595,6 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
       onToast(error instanceof Error ? error.message : "Errore creazione cartella");
     } finally {
       setCreatingFolder(false);
-    }
-  }
-
-  async function deleteItem(itemId: string, name: string) {
-    if (!confirm(`Eliminare "${name}"?`)) return;
-    try {
-      const res = await fetch("/api/drive/delete", { method: "POST", body: JSON.stringify({ itemId }) });
-      if (!res.ok) throw new Error("Errore eliminazione");
-      onToast("Eliminato.", "success");
-      await loadItems();
-    } catch (error) {
-      onToast(error instanceof Error ? error.message : "Errore eliminazione");
-    }
-  }
-
-  async function renameItem(itemId: string, newName: string) {
-    try {
-      const res = await fetch("/api/drive/rename", { method: "POST", body: JSON.stringify({ itemId, newName }) });
-      if (!res.ok) throw new Error("Errore rinomina");
-      onToast("Rinominato.", "success");
-      setRenaming(null);
-      await loadItems();
-    } catch (error) {
-      onToast(error instanceof Error ? error.message : "Errore rinomina");
     }
   }
 
@@ -3652,30 +3661,16 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
               <div key={item.id} className="glass flex items-center justify-between rounded-md p-3">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                   {isFolder(item.mimeType) ? <FolderOpen size={16} className="shrink-0 text-orange-300" /> : <FileAudio size={16} className="shrink-0 text-white/40" />}
-                  {renaming === item.id ? (
-                    <input
-                      autoFocus
-                      defaultValue={item.name}
-                      onBlur={(e) => (e.target.value.trim() ? renameItem(item.id, e.target.value) : setRenaming(null))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && e.currentTarget.value.trim()) renameItem(item.id, e.currentTarget.value);
-                        if (e.key === "Escape") setRenaming(null);
-                      }}
-                      className="field flex-1 rounded px-2 py-1 text-sm"
-                    />
-                  ) : (
-                    <button
-                      onClick={() => isFolder(item.mimeType) && navigate(item.id, item.name)}
-                      className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-white hover:text-orange-200"
-                    >
-                      {item.name}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => isFolder(item.mimeType) && navigate(item.id, item.name)}
+                    className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-white hover:text-orange-200"
+                  >
+                    {item.name}
+                  </button>
                 </div>
-                <div className="ml-2 flex shrink-0 gap-1">
-                  {!isFolder(item.mimeType) && (
-                    isGoogleNative(item.mimeType) ? (
-                      // Google Workspace files (Docs, Sheets, Shortcuts…) — open in Drive, not download
+                {!isFolder(item.mimeType) && (
+                  <div className="ml-2 shrink-0">
+                    {isGoogleNative(item.mimeType) ? (
                       <a
                         href={item.webViewLink ?? "#"}
                         target="_blank"
@@ -3687,7 +3682,6 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
                         <ExternalLink size={14} />
                       </a>
                     ) : (
-                      // Binary files — proxy download
                       <a
                         href={`/api/drive/file/${item.id}?name=${encodeURIComponent(item.name)}`}
                         download={item.name}
@@ -3697,15 +3691,9 @@ function DriveSection({ user, onToast }: { user: AppUser; onToast: (text: string
                       >
                         <Download size={14} />
                       </a>
-                    )
-                  )}
-                  <button onClick={() => setRenaming(item.id)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 text-white/50 hover:text-orange-300">
-                    <Pencil size={14} />
-                  </button>
-                  <button onClick={() => deleteItem(item.id, item.name)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-red-400/20 text-red-400/50 hover:bg-red-500/10 hover:text-red-300">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
