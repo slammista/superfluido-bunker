@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
@@ -117,6 +118,16 @@ export function SuperfluidoApp() {
   const [playingTrack, setPlayingTrack] = useState<Track | null>(null);
   const [playerAlbumTracks, setPlayerAlbumTracks] = useState<Track[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
+  const [headerScrolled, setHeaderScrolled] = useState(false);
+  useEffect(() => {
+    function onScroll() { setHeaderScrolled(window.scrollY > 20); }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [view]);
 
   function showToast(text: string, kind: "error" | "success" = "error") {
     setToast({ text, kind });
@@ -192,6 +203,14 @@ export function SuperfluidoApp() {
         const task = payload.new as KanbanTask;
         if (task.assegnato_a === uid && "Notification" in window && Notification.permission === "granted") {
           new Notification("Nuovo task assegnato", { body: task.titolo, icon: "/assets/logo_login.png" });
+        }
+        loadWorkspace(uid);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks_kanban" }, (payload) => {
+        const task = payload.new as KanbanTask;
+        const prev = payload.old as KanbanTask;
+        if (task.stato === "Completato" && prev.stato !== "Completato" && "Notification" in window && Notification.permission === "granted") {
+          new Notification("✅ Task completata", { body: task.titolo, icon: "/assets/logo_login.png" });
         }
         loadWorkspace(uid);
       })
@@ -305,7 +324,7 @@ export function SuperfluidoApp() {
       const origin = process.env.NEXT_PUBLIC_SITE_URL ??
         (typeof window !== "undefined" ? window.location.origin : "");
       const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
-        redirectTo: origin,
+        redirectTo: `${origin}/reset-password`,
       });
       if (error) throw error;
       setNotice("Email inviata! Controlla la tua casella e clicca il link.");
@@ -345,7 +364,7 @@ export function SuperfluidoApp() {
         <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
       </div>
 
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/55 backdrop-blur-2xl">
+      <header className={`sticky top-0 z-40 border-b border-white/10 bg-black/55 backdrop-blur-2xl${headerScrolled ? " scrolled" : ""}`}>
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <button className="flex items-center gap-3 text-left" onClick={() => setView("home")}>
             <span className="relative block h-10 w-10 overflow-hidden rounded-md border border-white/10 bg-white/5">
@@ -387,38 +406,35 @@ export function SuperfluidoApp() {
 
       <section className={`mx-auto max-w-7xl px-4 py-6 lg:py-8 ${playingTrack ? "pb-[136px] xl:pb-28" : "pb-16 xl:pb-0"}`}>
         {notice ? <Notice text={notice} /> : null}
-
-        <div className={view === "home" ? "" : "hidden"}>
-          <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} />
-        </div>
-        <div className={view === "inventory" ? "" : "hidden"}>
-          <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
-        <div className={view === "calendar" ? "" : "hidden"}>
-          <CalendarModule events={state.events} tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
-        <div className={view === "projects" ? "" : "hidden"}>
-          <Projects
-            albums={state.albums}
-            tracks={state.tracks}
-            user={user}
-            reload={() => loadWorkspace(user.id)}
-            onToast={showToast}
-            playingTrack={playingTrack}
-            setPlayingTrack={setPlayingTrack}
-            playerAlbumTracks={playerAlbumTracks}
-            setPlayerAlbumTracks={setPlayerAlbumTracks}
-          />
-        </div>
-        <div className={view === "distrib" ? "" : "hidden"}>
-          <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />
-        </div>
-        <div className={view === "profile" ? "" : "hidden"}>
-          <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
-        <div className={view === "vault" ? "" : "hidden"}>
-          <Vault files={state.vault} folders={state.folders} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={view}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+          >
+            {view === "home" && <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} />}
+            {view === "inventory" && <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+            {view === "calendar" && <CalendarModule events={state.events} tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+            {view === "projects" && (
+              <Projects
+                albums={state.albums}
+                tracks={state.tracks}
+                user={user}
+                reload={() => loadWorkspace(user.id)}
+                onToast={showToast}
+                playingTrack={playingTrack}
+                setPlayingTrack={setPlayingTrack}
+                playerAlbumTracks={playerAlbumTracks}
+                setPlayerAlbumTracks={setPlayerAlbumTracks}
+              />
+            )}
+            {view === "distrib" && <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />}
+            {view === "profile" && <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+            {view === "vault" && <Vault files={state.vault} folders={state.folders} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+          </motion.div>
+        </AnimatePresence>
       </section>
 
       {/* Persistent audio player */}
@@ -433,13 +449,15 @@ export function SuperfluidoApp() {
       )}
 
       {/* Floating AI chat button */}
-      <button
+      <motion.button
         onClick={() => setChatOpen((o) => !o)}
+        whileHover={{ scale: 1.08 }}
+        whileTap={{ scale: 0.94 }}
         className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
         title="AI Assistant"
       >
         <Sparkles size={22} />
-      </button>
+      </motion.button>
 
       {/* AI chat slide-in panel */}
       <AIChatPanel
@@ -701,15 +719,17 @@ function NavButton({
 }) {
   const Icon = item.icon;
   return (
-    <button
+    <motion.button
       onClick={onClick}
+      whileHover={{ scale: 1.03 }}
+      whileTap={{ scale: 0.97 }}
       className={`inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-bold transition ${
         active ? "bg-orange-500 text-black" : "text-white/62 hover:bg-white/8 hover:text-white"
       } ${compact ? "border border-white/10 bg-white/[0.04]" : ""}`}
     >
       <Icon size={15} />
       {item.label}
-    </button>
+    </motion.button>
   );
 }
 
@@ -765,8 +785,18 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
     .slice(0, 5);
   const recentTracks = state.tracks.slice(0, 5);
 
+  const metricContainer = {
+    hidden: {},
+    visible: { transition: { staggerChildren: 0.07 } },
+  };
+  const metricItem = {
+    hidden: { opacity: 0, y: 12 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.22 } },
+  };
+
   return (
     <>
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="glass overflow-hidden rounded-md p-6 md:p-8">
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-orange-300">Control room</p>
@@ -810,13 +840,16 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
           </div>
         </div>
       </section>
+      </motion.div>
 
+      <motion.div variants={metricContainer} initial="hidden" animate="visible">
       <section className="metric-grid mt-5 grid gap-4">
-        <Metric title="Stock totale" value={totalStock.toString()} tone="orange" />
-        <Metric title="Alert stock" value={lowStock.length.toString()} tone="red" />
-        <Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" />
-        <Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" />
+        <motion.div variants={metricItem}><Metric title="Stock totale" value={totalStock.toString()} tone="orange" /></motion.div>
+        <motion.div variants={metricItem}><Metric title="Alert stock" value={lowStock.length.toString()} tone="red" /></motion.div>
+        <motion.div variants={metricItem}><Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" /></motion.div>
+        <motion.div variants={metricItem}><Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" /></motion.div>
       </section>
+      </motion.div>
 
       {/* Inline AI chat embed */}
       <section className="mt-5" id="overview-ai-chat">
@@ -824,6 +857,7 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
       </section>
 
       {/* Widget task board */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.22 }}>
       <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
         {/* Task da fare */}
         <div className="glass rounded-md p-5">
@@ -860,10 +894,10 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
               {state.tasks
                 .filter((t) => t.stato !== "Completato")
                 .slice(0, 4)
-                .map((task) => {
+                .map((task, idx) => {
                   const isInCorso = task.stato === "In Corso";
                   return (
-                    <div key={task.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                    <motion.div key={task.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${isInCorso ? "bg-orange-400" : "bg-white/25"}`} />
                       <p className="flex-1 truncate text-sm font-semibold text-white/80">{task.titolo}</p>
                       {task.scadenza && (
@@ -871,7 +905,7 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
                           {new Date(task.scadenza).toLocaleDateString("it-IT")}
                         </p>
                       )}
-                    </div>
+                    </motion.div>
                   );
                 })}
             </div>
@@ -897,21 +931,23 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
                 .filter((e) => new Date(e.data_evento) >= new Date())
                 .sort((a, b) => new Date(a.data_evento).getTime() - new Date(b.data_evento).getTime())
                 .slice(0, 4)
-                .map((ev) => (
-                  <div key={ev.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                .map((ev, idx) => (
+                  <motion.div key={ev.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ev.colore ?? "#f97316" }} />
                     <p className="flex-1 truncate text-sm font-semibold text-white/80">{ev.titolo}</p>
                     <p className="shrink-0 font-mono text-[10px] text-white/35">
                       {new Date(ev.data_evento).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
                     </p>
-                  </div>
+                  </motion.div>
                 ))}
             </div>
           )}
         </div>
       </section>
+      </motion.div>
 
       {/* Release in arrivo + ultime tracce */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18, duration: 0.22 }}>
       <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
         <div className="glass rounded-md p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -927,14 +963,14 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
             <p className="py-3 text-center text-sm text-white/30">Nessuna release con data impostata.</p>
           ) : (
             <div className="space-y-2">
-              {upcomingReleases.map((album) => (
-                <div key={album.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+              {upcomingReleases.map((album, idx) => (
+                <motion.div key={album.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                   <Radio size={12} className="shrink-0 text-orange-300/60" />
                   <p className="flex-1 truncate text-sm font-semibold text-white/80">{album.nome_album}</p>
                   <p className="shrink-0 font-mono text-[10px] text-white/35">
                     {new Date(album.release_date!).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })}
                   </p>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
@@ -954,19 +990,20 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
             <p className="py-3 text-center text-sm text-white/30">Nessuna traccia caricata.</p>
           ) : (
             <div className="space-y-2">
-              {recentTracks.map((track) => (
-                <div key={track.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+              {recentTracks.map((track, idx) => (
+                <motion.div key={track.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                   <Music size={12} className="shrink-0 text-white/25" />
                   <p className="flex-1 truncate text-sm font-semibold text-white/80">{track.nome_traccia}</p>
                   <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${trackPhaseBadge(track.fase)}`}>
                     {track.fase ?? "—"}
                   </span>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
         </div>
       </section>
+      </motion.div>
     </>
   );
 }
@@ -1041,42 +1078,57 @@ function markdownToHtml(md: string): string {
 
 // ── PrintPreviewModal ─────────────────────────────────────────────────────────
 
-function PrintPreviewModal({ content, onClose }: { content: string; onClose: () => void }) {
+function PrintPreviewModal({ content, onClose, onToast }: { content: string; onClose: () => void; onToast?: (text: string, kind?: "error" | "success") => void }) {
   const html = markdownToHtml(content);
+  const savedRef = useRef(false);
 
   useEffect(() => {
-    const style = document.createElement("style");
-    style.id = "sf-print-style";
-    style.textContent = `
-      .sf-prose { font-family: Georgia, "Times New Roman", serif; color: #111; line-height: 1.8; }
-      .sf-prose h1 { font-size: 1.9rem; font-weight: 900; font-family: Arial, sans-serif; border-bottom: 3px solid #111; padding-bottom: 0.4em; margin: 0 0 1em; }
-      .sf-prose h2 { font-size: 1.2rem; font-weight: 700; font-family: Arial, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; margin: 2em 0 0.7em; color: #333; }
-      .sf-prose h3 { font-size: 1rem; font-weight: 700; font-family: Arial, sans-serif; margin: 1.5em 0 0.5em; }
-      .sf-prose p  { margin: 0.7em 0; }
-      .sf-prose ul { padding-left: 1.6em; margin: 0.7em 0; }
-      .sf-prose li { margin: 0.35em 0; }
-      .sf-prose strong { font-weight: 700; }
-      .sf-prose em { font-style: italic; }
-      .sf-prose code { background: #f0f0f0; padding: 0.15em 0.4em; border-radius: 3px; font-family: monospace; font-size: 0.88em; }
-      @media print {
-        body > *:not(#sf-print-modal) { display: none !important; }
-        #sf-print-modal { position: static !important; overflow: visible !important; background: white !important; }
-        #sf-print-controls { display: none !important; }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => document.getElementById("sf-print-style")?.remove();
-  }, []);
+    if (!onToast || savedRef.current) return;
+    savedRef.current = true;
+    const today = new Date();
+    const [year, month, day] = today.toISOString().split("T")[0].split("-");
+    const italianDate = `${day}/${month}/${year}`;
+    const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(/:/g, "");
+    const filePath = `press-kit/press-kit-${dateTimeStr}.html`;
+    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const supabase = getSupabase();
+    (async () => {
+      const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, blob, { contentType: "text/html", upsert: true });
+      if (storageErr) { onToast(`Errore upload vault: ${storageErr.message}`); return; }
+      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+      const { error: dbErr } = await supabase.from("vault_documenti").insert({ nome_file: `Press Kit ${italianDate}`, cartella: "Press", file_url: urlData.publicUrl });
+      if (dbErr) { onToast(`Errore vault: ${dbErr.message}`); return; }
+      onToast("Press kit salvato nel Vault → cartella Press.", "success");
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function downloadHtml() {
+    const today = new Date();
+    const [year, month, day] = today.toISOString().split("T")[0].split("-");
+    const italianDate = `${day}/${month}/${year}`;
+    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `press-kit-superfluido-${today.toISOString().split("T")[0]}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   return (
-    <div id="sf-print-modal" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
-      <div className="mx-auto max-w-2xl px-8 py-8">
-        <div id="sf-print-controls" className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
+    <div className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
+      <div className="mx-auto max-w-2xl px-6 py-8 sm:px-8">
+        <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
           <button
-            onClick={() => window.print()}
-            className="rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
+            onClick={downloadHtml}
+            className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
           >
-            Stampa / Salva PDF
+            <Download size={15} />
+            Scarica
           </button>
           <button
             onClick={onClose}
@@ -1084,30 +1136,64 @@ function PrintPreviewModal({ content, onClose }: { content: string; onClose: () 
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Su mobile: Stampa → Salva come PDF</span>
+          <span className="text-xs text-gray-400">Apri il file scaricato → stampa → salva come PDF</span>
         </div>
-        <div className="sf-prose" dangerouslySetInnerHTML={{ __html: html }} />
+        {/* Branded preview */}
+        <div style={{ borderTop: "5px solid #f97316", marginBottom: "0" }} />
+        <div style={{ padding: "32px 0 8px", borderBottom: "1px solid #e5e5e5", marginBottom: "32px" }}>
+          <div style={{ fontSize: "9px", fontFamily: "Helvetica,Arial,sans-serif", letterSpacing: ".4em", textTransform: "uppercase" as const, color: "#f97316", fontWeight: 700, marginBottom: "10px" }}>
+            SUPERFLUIDO · BUNKER OPERATING SYSTEM
+          </div>
+          <div style={{ fontSize: "40px", fontWeight: 900, lineHeight: "1", letterSpacing: "-1.5px", fontFamily: "Helvetica,Arial,sans-serif", color: "#000" }}>
+            MEDIA PRESS KIT
+          </div>
+          <div style={{ marginTop: "12px", fontSize: "11px", color: "#999", fontFamily: "Helvetica,Arial,sans-serif" }}>
+            {new Date().toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })}
+          </div>
+        </div>
+        <div style={{ fontFamily: "Georgia,'Times New Roman',serif", color: "#111", lineHeight: "1.85" }}
+          dangerouslySetInnerHTML={{ __html: html.replace(/<h1>/g, '<h1 style="font-size:20px;font-weight:900;font-family:Helvetica,Arial,sans-serif;border-left:4px solid #f97316;padding-left:14px;margin:32px 0 12px;color:#000">').replace(/<h2>/g, '<h2 style="font-size:11px;font-weight:700;font-family:Helvetica,Arial,sans-serif;text-transform:uppercase;letter-spacing:.14em;color:#f97316;margin:24px 0 8px">').replace(/<h3>/g, '<h3 style="font-size:10px;font-weight:700;font-family:Helvetica,Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#888;margin:18px 0 6px">').replace(/<p>/g, '<p style="font-size:14px;line-height:1.85;color:#222;margin-bottom:12px">').replace(/<li>/g, '<li style="font-size:14px;line-height:1.75;margin-bottom:5px">') }}
+        />
       </div>
     </div>
   );
 }
 
-type PendingIntent = { type: string; entities: Record<string, string | null | undefined> };
-
 async function sendToAI(
   messages: ChatMessage[],
   context: ReturnType<typeof buildAIContext>,
   userId: string,
-  pendingIntent?: PendingIntent,
-): Promise<{ text: string; actionPerformed: boolean; actionMessage?: string; printable?: boolean; pendingIntent?: PendingIntent }> {
+  onChunk: (chunk: string) => void,
+): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; provider?: string }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context, userId, pendingIntent }),
+    body: JSON.stringify({ messages, context, userId }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Errore AI");
-  return data;
+  if (!res.ok) { const data = await res.json() as { error?: string }; throw new Error(data.error ?? "Errore AI"); }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let meta: { actionPerformed: boolean; actionMessage: string; printable: boolean; provider: string } =
+    { actionPerformed: false, actionMessage: "", printable: false, provider: "AI" };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const parsed = JSON.parse(line.slice(6)) as { type: string; text?: string; actionPerformed?: boolean; actionMessage?: string; printable?: boolean; provider?: string };
+        if (parsed.type === "chunk") onChunk(parsed.text ?? "");
+        else if (parsed.type === "done") meta = { actionPerformed: parsed.actionPerformed ?? false, actionMessage: parsed.actionMessage ?? "", printable: parsed.printable ?? false, provider: parsed.provider ?? "AI" };
+      } catch { /* ignore */ }
+    }
+  }
+  return meta;
 }
 
 // ── OverviewAIWidget (embedded ChatGPT-style) ────────────────────────────────
@@ -1127,7 +1213,7 @@ function OverviewAIWidget({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
-  const [pendingIntent, setPendingIntent] = useState<PendingIntent | undefined>(undefined);
+  const [aiProvider, setAiProvider] = useState("AI");
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1141,22 +1227,41 @@ function OverviewAIWidget({
     const userMsg: ChatMessage = { role: "user", content: text };
     const nextMessages = [...messages, userMsg];
     setInput("");
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
     setAiLoading(true);
     try {
-      const data = await sendToAI(nextMessages, buildAIContext(state), user.id, pendingIntent);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.text, printable: data.printable },
-      ]);
-      setPendingIntent(data.pendingIntent);
-      if (data.actionPerformed) {
+      let streamedContent = "";
+      const meta = await sendToAI(
+        nextMessages,
+        buildAIContext(state),
+        user.id,
+        (chunk) => {
+          streamedContent += chunk;
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              content: updated[updated.length - 1].content + chunk,
+            };
+            return updated;
+          });
+        },
+      );
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
+        return updated;
+      });
+      if (meta.provider) setAiProvider(meta.provider);
+      if (meta.printable) setPrintContent(streamedContent);
+      if (meta.actionPerformed) {
         await reload();
-        onToast(data.actionMessage ?? "Operazione completata.", "success");
+        onToast(meta.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
       console.error("AI error:", e);
-      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.");
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.", "error");
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setAiLoading(false);
     }
@@ -1177,14 +1282,14 @@ function OverviewAIWidget({
         <p className="font-black text-white">AI Assistant</p>
         {messages.length > 0 && (
           <button
-            onClick={() => { setMessages([]); setPendingIntent(undefined); }}
+            onClick={() => setMessages([])}
             className="ml-2 text-[11px] text-white/30 transition hover:text-white/60"
           >
             Nuova chat
           </button>
         )}
         <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/22">
-          AI
+          {aiProvider}
         </span>
       </div>
 
@@ -1242,7 +1347,7 @@ function OverviewAIWidget({
           </div>
         ))}
 
-        {aiLoading && (
+        {aiLoading && messages[messages.length - 1]?.content === "" && (
           <div className="mb-4 flex justify-start">
             <span className="mr-2 mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-500/15">
               <Sparkles size={11} className="text-orange-300" />
@@ -1284,7 +1389,7 @@ function OverviewAIWidget({
       </div>
 
       {printContent !== null && (
-        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} onToast={onToast} />
       )}
     </div>
   );
@@ -1313,7 +1418,7 @@ function AIChatPanel({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
-  const [pendingIntent, setPendingIntent] = useState<PendingIntent | undefined>(undefined);
+  const [aiProvider, setAiProvider] = useState("AI");
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1327,22 +1432,41 @@ function AIChatPanel({
     const userMsg: ChatMessage = { role: "user", content: text };
     const nextMessages = [...messages, userMsg];
     setInput("");
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
     setAiLoading(true);
     try {
-      const data = await sendToAI(nextMessages, buildAIContext(state), user.id, pendingIntent);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.text, printable: data.printable },
-      ]);
-      setPendingIntent(data.pendingIntent);
-      if (data.actionPerformed) {
+      let streamedContent = "";
+      const meta = await sendToAI(
+        nextMessages,
+        buildAIContext(state),
+        user.id,
+        (chunk) => {
+          streamedContent += chunk;
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              content: updated[updated.length - 1].content + chunk,
+            };
+            return updated;
+          });
+        },
+      );
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
+        return updated;
+      });
+      if (meta.provider) setAiProvider(meta.provider);
+      if (meta.printable) setPrintContent(streamedContent);
+      if (meta.actionPerformed) {
         await reload();
-        onToast(data.actionMessage ?? "Operazione completata.", "success");
+        onToast(meta.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
       console.error("AI error:", e);
-      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.");
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.", "error");
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setAiLoading(false);
     }
@@ -1364,11 +1488,11 @@ function AIChatPanel({
         <Sparkles size={15} className="text-orange-300" />
         <p className="flex-1 text-sm font-black text-white">AI Assistant</p>
         <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
-          AI
+          {aiProvider}
         </span>
         {messages.length > 0 && (
           <button
-            onClick={() => { setMessages([]); setPendingIntent(undefined); }}
+            onClick={() => setMessages([])}
             className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] font-semibold text-white/40 transition hover:border-orange-500/40 hover:text-orange-300"
           >
             <Plus size={11} />
@@ -1424,7 +1548,7 @@ function AIChatPanel({
           </div>
         ))}
 
-        {aiLoading && (
+        {aiLoading && messages[messages.length - 1]?.content === "" && (
           <div className="mb-3 flex justify-start">
             <div className="rounded-md bg-white/[0.06] px-3 py-2.5">
               <div className="flex gap-1">
@@ -1463,7 +1587,7 @@ function AIChatPanel({
       </div>
 
       {printContent !== null && (
-        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} onToast={onToast} />
       )}
     </div>
   );
@@ -1472,6 +1596,24 @@ function AIChatPanel({
 // ── Metric card ───────────────────────────────────────────────────────────────
 
 function Metric({ title, value, tone }: { title: string; value: string; tone: "orange" | "red" | "blue" | "green" }) {
+  const numericValue = parseInt(value, 10);
+  const isNumeric = !isNaN(numericValue);
+  const [displayed, setDisplayed] = useState(isNumeric ? 0 : null);
+
+  useEffect(() => {
+    if (!isNumeric) return;
+    const start = performance.now();
+    const duration = 800;
+    function frame(now: number) {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayed(Math.round(eased * numericValue));
+      if (progress < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }, [numericValue, isNumeric]);
+
+  const displayValue = isNumeric ? String(displayed) : value;
   const tones = {
     orange: "text-orange-200 bg-orange-500/12 border-orange-400/25",
     red: "text-red-200 bg-red-500/10 border-red-400/25",
@@ -1481,7 +1623,7 @@ function Metric({ title, value, tone }: { title: string; value: string; tone: "o
   return (
     <div className={`rounded-md border p-5 ${tones[tone]}`}>
       <p className="text-xs font-bold uppercase tracking-[0.16em] opacity-65">{title}</p>
-      <p className="mt-3 font-mono text-4xl font-black">{value}</p>
+      <p className="mt-3 font-mono text-4xl font-black">{displayValue}</p>
     </div>
   );
 }
@@ -1491,7 +1633,25 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
   const [saving, setSaving] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [updatingProduct, setUpdatingProduct] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [inventoryView, setInventoryView] = useState<"list" | "analytics">("list");
   const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
+
+  const analyticsData = useMemo(() => {
+    const totalValue = products.reduce((sum, p) => {
+      const stock = (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
+      return sum + stock * Number(p.base_price_sell ?? 0);
+    }, 0);
+    const byProduct = products
+      .map((p) => ({ name: p.name, stock: (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0) }))
+      .sort((a, b) => b.stock - a.stock)
+      .slice(0, 8);
+    const maxStock = Math.max(...byProduct.map((p) => p.stock), 1);
+    const byCategory: Record<string, number> = {};
+    for (const p of products) { const cat = p.category ?? "Altro"; byCategory[cat] = (byCategory[cat] ?? 0) + 1; }
+    const lowStock = products.filter((p) => (p.product_variants ?? []).some((v) => Number(v.stock_quantity ?? 0) <= 3));
+    return { totalValue, byProduct, maxStock, byCategory, lowStock };
+  }, [products]);
 
   async function addProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1558,6 +1718,24 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
     <>
       <ModuleHeader title="Magazzino" text="Inventario merch, varianti e alert stock con lettura diretta dalle tabelle products e product_variants." icon={Warehouse} />
 
+      {/* Tab Lista / Analytics */}
+      <div className="mb-5 flex items-center gap-2">
+        <button
+          onClick={() => setInventoryView("list")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${inventoryView === "list" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <List size={14} />
+          Lista
+        </button>
+        <button
+          onClick={() => setInventoryView("analytics")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${inventoryView === "analytics" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <Sparkles size={14} />
+          Analytics
+        </button>
+      </div>
+
       {/* Modal modifica prodotto */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4" onClick={() => setEditingProduct(null)}>
@@ -1596,6 +1774,7 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
         </div>
       )}
 
+      {inventoryView === "list" && (
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <div className="glass rounded-md p-5">
           <div className="mb-5 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
@@ -1692,17 +1871,105 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
           </div>
         </div>
 
-        <form onSubmit={addProduct} className="glass rounded-md p-5">
-          <p className="text-lg font-black text-white">Nuovo prodotto</p>
-          <p className="mt-1 text-sm text-white/50">Creazione rapida su Supabase per merch e supporti fisici.</p>
-          <Input name="name" label="Nome" required />
-          <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
-          <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
-          <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
-          <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
-          <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
-        </form>
+        <div className="glass rounded-md">
+          <button
+            type="button"
+            onClick={() => setShowAddForm((v) => !v)}
+            className="flex w-full items-center justify-between px-5 py-4 lg:hidden"
+          >
+            <span className="text-sm font-black text-white">+ Nuovo prodotto</span>
+            <ChevronRight size={16} className={`text-white/40 transition-transform duration-200 ${showAddForm ? "rotate-90" : ""}`} />
+          </button>
+          <form
+            onSubmit={addProduct}
+            className={`p-5 ${showAddForm ? "block" : "hidden"} lg:block`}
+          >
+            <p className="hidden text-lg font-black text-white lg:block">Nuovo prodotto</p>
+            <p className="mt-1 hidden text-sm text-white/50 lg:block">Creazione rapida su Supabase per merch e supporti fisici.</p>
+            <Input name="name" label="Nome" required />
+            <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
+            <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
+            <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
+            <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
+            <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
+          </form>
+        </div>
       </div>
+      )}
+
+      {inventoryView === "analytics" && (
+        <div className="space-y-5">
+          {/* Valore totale */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="glass rounded-md border border-orange-400/25 bg-orange-500/12 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200/65">Valore totale stock</p>
+              <p className="mt-3 font-mono text-3xl font-black text-orange-200">{formatEuro(analyticsData.totalValue)}</p>
+            </div>
+            <div className="glass rounded-md border border-white/10 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">Prodotti totali</p>
+              <p className="mt-3 font-mono text-3xl font-black text-white">{products.length}</p>
+            </div>
+            <div className="glass rounded-md border border-red-400/25 bg-red-500/10 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200/65">Scorte basse (≤3)</p>
+              <p className="mt-3 font-mono text-3xl font-black text-red-300">{analyticsData.lowStock.length}</p>
+            </div>
+          </div>
+
+          {/* Stock per prodotto */}
+          <div className="glass rounded-md p-5">
+            <p className="mb-5 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Stock per prodotto</p>
+            <div className="space-y-3">
+              {analyticsData.byProduct.map((p) => (
+                <div key={p.name} className="flex items-center gap-3">
+                  <p className="w-36 shrink-0 truncate text-sm text-white/70">{p.name}</p>
+                  <div className="flex-1 rounded-full bg-white/[0.06]" style={{ height: 8 }}>
+                    <div
+                      className="rounded-full bg-orange-500 transition-all"
+                      style={{ height: 8, width: `${Math.round((p.stock / analyticsData.maxStock) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="w-8 shrink-0 text-right font-mono text-sm font-black text-white">{p.stock}</p>
+                </div>
+              ))}
+              {analyticsData.byProduct.length === 0 && <p className="text-sm text-white/35">Nessun prodotto.</p>}
+            </div>
+          </div>
+
+          {/* Distribuzione per categoria + Alert scorte basse */}
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="glass rounded-md p-5">
+              <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Per categoria</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(analyticsData.byCategory).map(([cat, count]) => {
+                  const pct = products.length > 0 ? Math.round((count / products.length) * 100) : 0;
+                  return (
+                    <div key={cat} className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                      <span className="text-sm font-bold text-white">{cat}</span>
+                      <span className="font-mono text-xs text-orange-300">{pct}%</span>
+                    </div>
+                  );
+                })}
+                {Object.keys(analyticsData.byCategory).length === 0 && <p className="text-sm text-white/35">Nessun dato.</p>}
+              </div>
+            </div>
+            <div className="glass rounded-md p-5">
+              <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Alert scorte basse</p>
+              <div className="space-y-2">
+                {analyticsData.lowStock.length === 0 && <p className="text-sm text-white/35">Nessun prodotto sotto soglia.</p>}
+                {analyticsData.lowStock.map((p) => {
+                  const stock = (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
+                  return (
+                    <div key={p.id} className="flex items-center justify-between rounded-md border border-red-400/20 bg-red-500/[0.06] px-3 py-2">
+                      <p className="text-sm text-white/80">{p.name}</p>
+                      <span className="font-mono text-sm font-black text-red-300">{stock} rimasti</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1714,6 +1981,14 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth()); // 0-indexed
   const [popoverEvent, setPopoverEvent] = useState<CalendarEvent | null>(null);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "denied"
+  );
+
+  function requestNotifPerm() {
+    if (!("Notification" in window)) return;
+    void Notification.requestPermission().then((p) => setNotifPerm(p));
+  }
 
   const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
   const GIORNI_HEADER = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
@@ -1835,7 +2110,7 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
       />
 
       {/* Toggle Mensile / Lista / Task Board */}
-      <div className="mb-5 flex items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setCalView("month")}
           className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${calView === "month" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
@@ -1857,6 +2132,14 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
           <ClipboardList size={14} />
           Task Board
         </button>
+        {calView === "kanban" && typeof window !== "undefined" && "Notification" in window && notifPerm !== "denied" && (
+          <button
+            onClick={notifPerm === "default" ? requestNotifPerm : undefined}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition ${notifPerm === "granted" ? "cursor-default bg-emerald-500/15 text-emerald-300" : "cursor-pointer bg-orange-500/15 text-orange-300 hover:bg-orange-500/25"}`}
+          >
+            🔔 {notifPerm === "granted" ? "Notifiche attive" : "Abilita notifiche"}
+          </button>
+        )}
       </div>
 
       {calView === "kanban" && (
@@ -1966,7 +2249,15 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
                     <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
                     <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
                     <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
-                    <div className="mt-4 flex justify-end">
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => downloadIcs(event)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
+                        title="Scarica ICS per Google / Apple Calendar"
+                      >
+                        <CalendarDays size={13} />
+                        ICS
+                      </button>
                       <button
                         onClick={() => deleteEvent(event.id)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
@@ -3119,6 +3410,33 @@ function Distrib({
   );
 }
 
+// Shared branded HTML wrapper — used by both PrintPreviewModal and PressKit
+function buildPressKitHtmlStyled(htmlBody: string, italianDate: string): string {
+  const css = `
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}
+    .accent-bar{height:6px;background:#f97316}
+    .page{max-width:780px;margin:0 auto;padding:48px 60px 60px}
+    .hdr{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:28px;border-bottom:1px solid #e5e5e5;margin-bottom:40px}
+    .brand-tag{font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.38em;text-transform:uppercase;color:#f97316;font-weight:700;margin-bottom:14px}
+    .pk-title{font-size:52px;font-weight:900;line-height:.92;letter-spacing:-2px;font-family:'Helvetica Neue',Arial,sans-serif;color:#000}
+    .hdr-meta{text-align:right;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;line-height:1.8}
+    .content h1{font-size:20px;font-weight:900;font-family:'Helvetica Neue',Arial,sans-serif;border-left:4px solid #f97316;padding-left:14px;margin:38px 0 12px;color:#000;line-height:1.2}
+    .content h2{font-size:11px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.15em;color:#f97316;margin:26px 0 8px}
+    .content h3{font-size:10px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#888;margin:20px 0 6px}
+    .content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}
+    .content ul{margin:4px 0 16px 0;list-style:none;padding:0}
+    .content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:6px;padding-left:18px;position:relative}
+    .content li::before{content:"—";position:absolute;left:0;color:#f97316;font-weight:700}
+    .content hr{border:none;border-top:1px solid #e5e5e5;margin:28px 0}
+    .content strong{font-weight:700;color:#000}
+    .content em{font-style:italic}
+    .footer{margin-top:56px;padding-top:16px;border-top:2px solid #f97316;font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.1em}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:36px 48px}}
+  `;
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>superfluido-bunker.vercel.app<br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div></body></html>`;
+}
+
 // FIX 5: PressKit con download .txt e salvataggio nel vault
 function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [prompt, setPrompt] = useState("Genera un press kit sintetico per la prossima release, includendo bio, pitch editoriale, punti forza e caption social.");
@@ -3156,21 +3474,12 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
   }
 
   function buildPressKitHtml(content: string, italianDate: string): string {
-    // Markdown → HTML converter
-    function esc(s: string) {
-      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function inline(s: string) {
-      return esc(s)
-        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*(.+?)\*/g, "<em>$1</em>");
-    }
+    function esc(s: string) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function inline(s: string) { return esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>"); }
     const lines = content.split("\n");
     const chunks: string[] = [];
     const listBuf: string[] = [];
-    function flushList() {
-      if (listBuf.length) { chunks.push("<ul>" + listBuf.join("") + "</ul>"); listBuf.length = 0; }
-    }
+    function flushList() { if (listBuf.length) { chunks.push("<ul>" + listBuf.join("") + "</ul>"); listBuf.length = 0; } }
     for (const line of lines) {
       const t = line.trim();
       if (t.startsWith("### ")) { flushList(); chunks.push(`<h3>${inline(t.slice(4))}</h3>`); }
@@ -3183,19 +3492,23 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
       else { flushList(); chunks.push(`<p>${inline(t)}</p>`); }
     }
     flushList();
-    const body = chunks.join("\n");
-    const css = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}.page{max-width:760px;margin:0 auto;padding:60px 50px}.hdr{border-bottom:3px solid #f97316;padding-bottom:24px;margin-bottom:40px}.brand{font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#f97316;margin-bottom:8px;font-weight:700}.pk-title{font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;font-family:'Helvetica Neue',Arial,sans-serif}.dt{font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:#888;margin-top:10px}.content h1{font-size:26px;font-weight:900;margin:32px 0 10px;font-family:'Helvetica Neue',Arial,sans-serif}.content h2{font-size:20px;font-weight:800;margin:28px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif}.content h3{font-size:12px;font-weight:700;margin:26px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#f97316}.content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}.content ul{margin:4px 0 16px 20px}.content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:5px}.content hr{border:none;border-top:1px solid #e5e5e5;margin:20px 0}.content strong{font-weight:700;color:#000}.content em{font-style:italic}.footer{margin-top:50px;padding-top:18px;border-top:1px solid #e5e5e5;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:40px}}`;
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>${css}</style></head><body><div class="page"><div class="hdr"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="pk-title">Media Press Kit</div><div class="dt">Generato il ${esc(italianDate)}</div></div><div class="content">${body}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${esc(italianDate)}</span></div></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+    return buildPressKitHtmlStyled(chunks.join("\n"), italianDate);
   }
 
   function downloadPdf() {
     const today = new Date();
     const [year, month, day] = today.toISOString().split("T")[0].split("-");
     const italianDate = `${day}/${month}/${year}`;
-    const win = window.open("", "_blank");
-    if (!win) { onToast("Popup bloccato. Abilita i popup per generare il PDF."); return; }
-    win.document.write(buildPressKitHtml(answer, italianDate));
-    win.document.close();
+    const html = buildPressKitHtml(answer, italianDate);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `press-kit-superfluido-${today.toISOString().split("T")[0]}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function saveToVault() {
@@ -4082,7 +4395,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label: str
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <input className={`field mt-2 rounded-md px-3 py-2.5 text-sm ${className ?? ""}`} {...inputProps} />
+      <input className={`field mt-2 rounded-md px-3 py-2.5 text-base sm:text-sm ${className ?? ""}`} {...inputProps} />
     </label>
   );
 }
@@ -4092,7 +4405,7 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { l
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <textarea className={`field mt-2 min-h-28 rounded-md px-3 py-2.5 text-sm ${className ?? ""}`} {...textareaProps} />
+      <textarea className={`field mt-2 min-h-28 rounded-md px-3 py-2.5 text-base sm:text-sm ${className ?? ""}`} {...textareaProps} />
     </label>
   );
 }
@@ -4101,7 +4414,7 @@ function Select({ label, name, options, defaultValue }: { label: string; name: s
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <select name={name} defaultValue={defaultValue} className="field mt-2 rounded-md px-3 py-2.5 text-sm">
+      <select name={name} defaultValue={defaultValue} className="field mt-2 rounded-md px-3 py-2.5 text-base sm:text-sm">
         {options.map((option) => (
           <option key={option} value={option} className="bg-neutral-950">
             {option}
@@ -4134,4 +4447,34 @@ function formatDate(value: string) {
     timeStyle: "short",
     timeZone: "Europe/Rome",
   }).format(new Date(value));
+}
+
+function generateIcs(event: CalendarEvent): string {
+  const dt = new Date(event.data_evento);
+  function fmt(d: Date) { return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"; }
+  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//SUPERFLUIDO Bunker//IT",
+    "BEGIN:VEVENT",
+    `UID:${String(event.id)}@superfluido-bunker`,
+    `DTSTART:${fmt(dt)}`,
+    `DTEND:${fmt(dtEnd)}`,
+    `SUMMARY:${event.titolo ?? ""}`,
+    event.luogo ? `LOCATION:${event.luogo}` : "",
+    event.tipo_evento ? `DESCRIPTION:${event.tipo_evento}` : "",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+}
+
+function downloadIcs(event: CalendarEvent) {
+  const blob = new Blob([generateIcs(event)], { type: "text/calendar" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(event.titolo ?? "evento").replace(/\s+/g, "-")}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
