@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
@@ -117,6 +118,12 @@ export function SuperfluidoApp() {
   const [playingTrack, setPlayingTrack] = useState<Track | null>(null);
   const [playerAlbumTracks, setPlayerAlbumTracks] = useState<Track[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
+  const [headerScrolled, setHeaderScrolled] = useState(false);
+  useEffect(() => {
+    function onScroll() { setHeaderScrolled(window.scrollY > 20); }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   function showToast(text: string, kind: "error" | "success" = "error") {
     setToast({ text, kind });
@@ -345,7 +352,7 @@ export function SuperfluidoApp() {
         <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
       </div>
 
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/55 backdrop-blur-2xl">
+      <header className={`sticky top-0 z-40 border-b border-white/10 bg-black/55 backdrop-blur-2xl${headerScrolled ? " scrolled" : ""}`}>
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <button className="flex items-center gap-3 text-left" onClick={() => setView("home")}>
             <span className="relative block h-10 w-10 overflow-hidden rounded-md border border-white/10 bg-white/5">
@@ -387,38 +394,35 @@ export function SuperfluidoApp() {
 
       <section className={`mx-auto max-w-7xl px-4 py-6 lg:py-8 ${playingTrack ? "pb-[136px] xl:pb-28" : "pb-16 xl:pb-0"}`}>
         {notice ? <Notice text={notice} /> : null}
-
-        <div className={view === "home" ? "" : "hidden"}>
-          <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} />
-        </div>
-        <div className={view === "inventory" ? "" : "hidden"}>
-          <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
-        <div className={view === "calendar" ? "" : "hidden"}>
-          <CalendarModule events={state.events} tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
-        <div className={view === "projects" ? "" : "hidden"}>
-          <Projects
-            albums={state.albums}
-            tracks={state.tracks}
-            user={user}
-            reload={() => loadWorkspace(user.id)}
-            onToast={showToast}
-            playingTrack={playingTrack}
-            setPlayingTrack={setPlayingTrack}
-            playerAlbumTracks={playerAlbumTracks}
-            setPlayerAlbumTracks={setPlayerAlbumTracks}
-          />
-        </div>
-        <div className={view === "distrib" ? "" : "hidden"}>
-          <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />
-        </div>
-        <div className={view === "profile" ? "" : "hidden"}>
-          <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
-        <div className={view === "vault" ? "" : "hidden"}>
-          <Vault files={state.vault} folders={state.folders} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={view}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+          >
+            {view === "home" && <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} />}
+            {view === "inventory" && <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+            {view === "calendar" && <CalendarModule events={state.events} tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+            {view === "projects" && (
+              <Projects
+                albums={state.albums}
+                tracks={state.tracks}
+                user={user}
+                reload={() => loadWorkspace(user.id)}
+                onToast={showToast}
+                playingTrack={playingTrack}
+                setPlayingTrack={setPlayingTrack}
+                playerAlbumTracks={playerAlbumTracks}
+                setPlayerAlbumTracks={setPlayerAlbumTracks}
+              />
+            )}
+            {view === "distrib" && <Distrib albums={state.albums} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} goTo={setView} />}
+            {view === "profile" && <Profiles profiles={state.profiles} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+            {view === "vault" && <Vault files={state.vault} folders={state.folders} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
+          </motion.div>
+        </AnimatePresence>
       </section>
 
       {/* Persistent audio player */}
@@ -433,13 +437,15 @@ export function SuperfluidoApp() {
       )}
 
       {/* Floating AI chat button */}
-      <button
+      <motion.button
         onClick={() => setChatOpen((o) => !o)}
+        whileHover={{ scale: 1.08 }}
+        whileTap={{ scale: 0.94 }}
         className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
         title="AI Assistant"
       >
         <Sparkles size={22} />
-      </button>
+      </motion.button>
 
       {/* AI chat slide-in panel */}
       <AIChatPanel
@@ -701,15 +707,17 @@ function NavButton({
 }) {
   const Icon = item.icon;
   return (
-    <button
+    <motion.button
       onClick={onClick}
+      whileHover={{ scale: 1.03 }}
+      whileTap={{ scale: 0.97 }}
       className={`inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-bold transition ${
         active ? "bg-orange-500 text-black" : "text-white/62 hover:bg-white/8 hover:text-white"
       } ${compact ? "border border-white/10 bg-white/[0.04]" : ""}`}
     >
       <Icon size={15} />
       {item.label}
-    </button>
+    </motion.button>
   );
 }
 
@@ -765,8 +773,18 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
     .slice(0, 5);
   const recentTracks = state.tracks.slice(0, 5);
 
+  const metricContainer = {
+    hidden: {},
+    visible: { transition: { staggerChildren: 0.07 } },
+  };
+  const metricItem = {
+    hidden: { opacity: 0, y: 12 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.22 } },
+  };
+
   return (
     <>
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="glass overflow-hidden rounded-md p-6 md:p-8">
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-orange-300">Control room</p>
@@ -810,13 +828,16 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
           </div>
         </div>
       </section>
+      </motion.div>
 
+      <motion.div variants={metricContainer} initial="hidden" animate="visible">
       <section className="metric-grid mt-5 grid gap-4">
-        <Metric title="Stock totale" value={totalStock.toString()} tone="orange" />
-        <Metric title="Alert stock" value={lowStock.length.toString()} tone="red" />
-        <Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" />
-        <Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" />
+        <motion.div variants={metricItem}><Metric title="Stock totale" value={totalStock.toString()} tone="orange" /></motion.div>
+        <motion.div variants={metricItem}><Metric title="Alert stock" value={lowStock.length.toString()} tone="red" /></motion.div>
+        <motion.div variants={metricItem}><Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" /></motion.div>
+        <motion.div variants={metricItem}><Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" /></motion.div>
       </section>
+      </motion.div>
 
       {/* Inline AI chat embed */}
       <section className="mt-5" id="overview-ai-chat">
@@ -824,6 +845,7 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
       </section>
 
       {/* Widget task board */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.22 }}>
       <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
         {/* Task da fare */}
         <div className="glass rounded-md p-5">
@@ -860,10 +882,10 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
               {state.tasks
                 .filter((t) => t.stato !== "Completato")
                 .slice(0, 4)
-                .map((task) => {
+                .map((task, idx) => {
                   const isInCorso = task.stato === "In Corso";
                   return (
-                    <div key={task.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                    <motion.div key={task.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${isInCorso ? "bg-orange-400" : "bg-white/25"}`} />
                       <p className="flex-1 truncate text-sm font-semibold text-white/80">{task.titolo}</p>
                       {task.scadenza && (
@@ -871,7 +893,7 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
                           {new Date(task.scadenza).toLocaleDateString("it-IT")}
                         </p>
                       )}
-                    </div>
+                    </motion.div>
                   );
                 })}
             </div>
@@ -897,21 +919,23 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
                 .filter((e) => new Date(e.data_evento) >= new Date())
                 .sort((a, b) => new Date(a.data_evento).getTime() - new Date(b.data_evento).getTime())
                 .slice(0, 4)
-                .map((ev) => (
-                  <div key={ev.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                .map((ev, idx) => (
+                  <motion.div key={ev.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ev.colore ?? "#f97316" }} />
                     <p className="flex-1 truncate text-sm font-semibold text-white/80">{ev.titolo}</p>
                     <p className="shrink-0 font-mono text-[10px] text-white/35">
                       {new Date(ev.data_evento).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
                     </p>
-                  </div>
+                  </motion.div>
                 ))}
             </div>
           )}
         </div>
       </section>
+      </motion.div>
 
       {/* Release in arrivo + ultime tracce */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18, duration: 0.22 }}>
       <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
         <div className="glass rounded-md p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -927,14 +951,14 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
             <p className="py-3 text-center text-sm text-white/30">Nessuna release con data impostata.</p>
           ) : (
             <div className="space-y-2">
-              {upcomingReleases.map((album) => (
-                <div key={album.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+              {upcomingReleases.map((album, idx) => (
+                <motion.div key={album.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                   <Radio size={12} className="shrink-0 text-orange-300/60" />
                   <p className="flex-1 truncate text-sm font-semibold text-white/80">{album.nome_album}</p>
                   <p className="shrink-0 font-mono text-[10px] text-white/35">
                     {new Date(album.release_date!).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })}
                   </p>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
@@ -954,19 +978,20 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
             <p className="py-3 text-center text-sm text-white/30">Nessuna traccia caricata.</p>
           ) : (
             <div className="space-y-2">
-              {recentTracks.map((track) => (
-                <div key={track.id} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
+              {recentTracks.map((track, idx) => (
+                <motion.div key={track.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                   <Music size={12} className="shrink-0 text-white/25" />
                   <p className="flex-1 truncate text-sm font-semibold text-white/80">{track.nome_traccia}</p>
                   <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${trackPhaseBadge(track.fase)}`}>
                     {track.fase ?? "—"}
                   </span>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
         </div>
       </section>
+      </motion.div>
     </>
   );
 }
@@ -1092,22 +1117,41 @@ function PrintPreviewModal({ content, onClose }: { content: string; onClose: () 
   );
 }
 
-type PendingIntent = { type: string; entities: Record<string, string | null | undefined> };
-
 async function sendToAI(
   messages: ChatMessage[],
   context: ReturnType<typeof buildAIContext>,
   userId: string,
-  pendingIntent?: PendingIntent,
-): Promise<{ text: string; actionPerformed: boolean; actionMessage?: string; printable?: boolean; pendingIntent?: PendingIntent }> {
+  onChunk: (chunk: string) => void,
+): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; provider?: string }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context, userId, pendingIntent }),
+    body: JSON.stringify({ messages, context, userId }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Errore AI");
-  return data;
+  if (!res.ok) { const data = await res.json() as { error?: string }; throw new Error(data.error ?? "Errore AI"); }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let meta: { actionPerformed: boolean; actionMessage: string; printable: boolean; provider: string } =
+    { actionPerformed: false, actionMessage: "", printable: false, provider: "AI" };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const parsed = JSON.parse(line.slice(6)) as { type: string; text?: string; actionPerformed?: boolean; actionMessage?: string; printable?: boolean; provider?: string };
+        if (parsed.type === "chunk") onChunk(parsed.text ?? "");
+        else if (parsed.type === "done") meta = { actionPerformed: parsed.actionPerformed ?? false, actionMessage: parsed.actionMessage ?? "", printable: parsed.printable ?? false, provider: parsed.provider ?? "AI" };
+      } catch { /* ignore */ }
+    }
+  }
+  return meta;
 }
 
 // ── OverviewAIWidget (embedded ChatGPT-style) ────────────────────────────────
@@ -1127,7 +1171,7 @@ function OverviewAIWidget({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
-  const [pendingIntent, setPendingIntent] = useState<PendingIntent | undefined>(undefined);
+  const [aiProvider, setAiProvider] = useState("AI");
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1141,22 +1185,41 @@ function OverviewAIWidget({
     const userMsg: ChatMessage = { role: "user", content: text };
     const nextMessages = [...messages, userMsg];
     setInput("");
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
     setAiLoading(true);
     try {
-      const data = await sendToAI(nextMessages, buildAIContext(state), user.id, pendingIntent);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.text, printable: data.printable },
-      ]);
-      setPendingIntent(data.pendingIntent);
-      if (data.actionPerformed) {
+      let streamedContent = "";
+      const meta = await sendToAI(
+        nextMessages,
+        buildAIContext(state),
+        user.id,
+        (chunk) => {
+          streamedContent += chunk;
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              content: updated[updated.length - 1].content + chunk,
+            };
+            return updated;
+          });
+        },
+      );
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
+        return updated;
+      });
+      if (meta.provider) setAiProvider(meta.provider);
+      if (meta.printable) setPrintContent(streamedContent);
+      if (meta.actionPerformed) {
         await reload();
-        onToast(data.actionMessage ?? "Operazione completata.", "success");
+        onToast(meta.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
       console.error("AI error:", e);
-      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.");
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.", "error");
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setAiLoading(false);
     }
@@ -1177,14 +1240,14 @@ function OverviewAIWidget({
         <p className="font-black text-white">AI Assistant</p>
         {messages.length > 0 && (
           <button
-            onClick={() => { setMessages([]); setPendingIntent(undefined); }}
+            onClick={() => setMessages([])}
             className="ml-2 text-[11px] text-white/30 transition hover:text-white/60"
           >
             Nuova chat
           </button>
         )}
         <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/22">
-          AI
+          {aiProvider}
         </span>
       </div>
 
@@ -1242,7 +1305,7 @@ function OverviewAIWidget({
           </div>
         ))}
 
-        {aiLoading && (
+        {aiLoading && messages[messages.length - 1]?.content === "" && (
           <div className="mb-4 flex justify-start">
             <span className="mr-2 mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-500/15">
               <Sparkles size={11} className="text-orange-300" />
@@ -1313,7 +1376,7 @@ function AIChatPanel({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
-  const [pendingIntent, setPendingIntent] = useState<PendingIntent | undefined>(undefined);
+  const [aiProvider, setAiProvider] = useState("AI");
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1327,22 +1390,41 @@ function AIChatPanel({
     const userMsg: ChatMessage = { role: "user", content: text };
     const nextMessages = [...messages, userMsg];
     setInput("");
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
     setAiLoading(true);
     try {
-      const data = await sendToAI(nextMessages, buildAIContext(state), user.id, pendingIntent);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.text, printable: data.printable },
-      ]);
-      setPendingIntent(data.pendingIntent);
-      if (data.actionPerformed) {
+      let streamedContent = "";
+      const meta = await sendToAI(
+        nextMessages,
+        buildAIContext(state),
+        user.id,
+        (chunk) => {
+          streamedContent += chunk;
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              content: updated[updated.length - 1].content + chunk,
+            };
+            return updated;
+          });
+        },
+      );
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
+        return updated;
+      });
+      if (meta.provider) setAiProvider(meta.provider);
+      if (meta.printable) setPrintContent(streamedContent);
+      if (meta.actionPerformed) {
         await reload();
-        onToast(data.actionMessage ?? "Operazione completata.", "success");
+        onToast(meta.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
       console.error("AI error:", e);
-      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.");
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.", "error");
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setAiLoading(false);
     }
@@ -1364,11 +1446,11 @@ function AIChatPanel({
         <Sparkles size={15} className="text-orange-300" />
         <p className="flex-1 text-sm font-black text-white">AI Assistant</p>
         <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
-          AI
+          {aiProvider}
         </span>
         {messages.length > 0 && (
           <button
-            onClick={() => { setMessages([]); setPendingIntent(undefined); }}
+            onClick={() => setMessages([])}
             className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] font-semibold text-white/40 transition hover:border-orange-500/40 hover:text-orange-300"
           >
             <Plus size={11} />
@@ -1424,7 +1506,7 @@ function AIChatPanel({
           </div>
         ))}
 
-        {aiLoading && (
+        {aiLoading && messages[messages.length - 1]?.content === "" && (
           <div className="mb-3 flex justify-start">
             <div className="rounded-md bg-white/[0.06] px-3 py-2.5">
               <div className="flex gap-1">
@@ -1472,6 +1554,24 @@ function AIChatPanel({
 // ── Metric card ───────────────────────────────────────────────────────────────
 
 function Metric({ title, value, tone }: { title: string; value: string; tone: "orange" | "red" | "blue" | "green" }) {
+  const numericValue = parseInt(value, 10);
+  const isNumeric = !isNaN(numericValue);
+  const [displayed, setDisplayed] = useState(isNumeric ? 0 : null);
+
+  useEffect(() => {
+    if (!isNumeric) return;
+    const start = performance.now();
+    const duration = 800;
+    function frame(now: number) {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayed(Math.round(eased * numericValue));
+      if (progress < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }, [numericValue, isNumeric]);
+
+  const displayValue = isNumeric ? String(displayed) : value;
   const tones = {
     orange: "text-orange-200 bg-orange-500/12 border-orange-400/25",
     red: "text-red-200 bg-red-500/10 border-red-400/25",
@@ -1481,7 +1581,7 @@ function Metric({ title, value, tone }: { title: string; value: string; tone: "o
   return (
     <div className={`rounded-md border p-5 ${tones[tone]}`}>
       <p className="text-xs font-bold uppercase tracking-[0.16em] opacity-65">{title}</p>
-      <p className="mt-3 font-mono text-4xl font-black">{value}</p>
+      <p className="mt-3 font-mono text-4xl font-black">{displayValue}</p>
     </div>
   );
 }
