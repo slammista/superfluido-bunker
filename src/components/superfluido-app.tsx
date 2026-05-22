@@ -312,7 +312,7 @@ export function SuperfluidoApp() {
       const origin = process.env.NEXT_PUBLIC_SITE_URL ??
         (typeof window !== "undefined" ? window.location.origin : "");
       const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
-        redirectTo: origin,
+        redirectTo: `${origin}/reset-password`,
       });
       if (error) throw error;
       setNotice("Email inviata! Controlla la tua casella e clicca il link.");
