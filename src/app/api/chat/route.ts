@@ -1,309 +1,393 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const AI_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-
 // These values are already committed to the repository in scripts/ — not a new exposure.
 // They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
 const _SB_URL = "https://jbugnzagefqkvimaqyki.supabase.co";
 const _SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpidWduemFnZWZxa3ZpbWFxeWtpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTAxMjQ2OCwiZXhwIjoyMDkwNTg4NDY4fQ.QuR9u2mY_Zt5RUxKD0v0H5GcEvi-cvDPTvQnCeoZyNA";
 
-const SYSTEM_PROMPT = `Sei l'AI operativo di SUPERFLUIDO Bunker — sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO, fondato a Roma nel 2021.
-MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack | Produttori: Leony47, Giord.
-Base operativa: Roma. Genere: hip-hop indipendente, underground.
-Social: Instagram @superfluido_official | Booking: superfluido@booking.com
-
-## LINGUA
-Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riempimento.
-Non aggiungere MAI disclaimer come "non posso generare PDF" — puoi sempre generare testi.
-
-## GENERAZIONE TESTI E DOCUMENTI
-Per qualsiasi richiesta di: press kit, bio artistica, tech rider, caption social,
-comunicato stampa, CV, documento, PDF, testo formattato →
-→ Genera SUBITO il contenuto in markdown BEN FORMATTATO con heading (# ## ###), bold (**testo**), liste (-)
-→ USA i dati reali dal contesto workspace: profili artisti, discografia, eventi futuri
-→ Se il contesto ha dati profilo per l'artista richiesto, usali; altrimenti usa le info generali sul collettivo
-→ NON creare task o eventi per soddisfare queste richieste
-→ Aggiungi SEMPRE alla fine esattamente: [PRINTABLE]
-
-## STRUTTURA PRESS KIT (quando richiesto)
-# [Nome Artista / SUPERFLUIDO] — Press Kit [Anno]
-## Biografia
-[testo dalla bio_breve del profilo + espansione artistica]
-## Discografia
-[lista degli album/singoli dalla discografia nel contesto, con anno]
-## Stile & Influenze
-[analisi del sound basata su strumentazione/ruolo del profilo]
-## Live & Collaborazioni
-[eventi futuri dal contesto + note collaborative]
-## Contatti & Link
-[email, instagram, spotify dal profilo]
-
-## USO DEI TOOL — regole TASSATIVE
-
-USA create_task SOLO se l'utente dice esplicitamente:
-  "crea un task", "aggiungi al kanban", "aggiungi una to-do", "ricordami di [azione]"
-  ❌ MAI per: generare testo, PDF, documenti, domande generali
-
-USA create_event SOLO se l'utente dice esplicitamente:
-  "aggiungi al calendario", "crea un evento", "segna una data", "metti in agenda"
-  → Se la data/ora non è specificata, CHIEDILA prima di chiamare il tool
-  ❌ MAI per domande sugli eventi esistenti
-
-USA search_vault SOLO se l'utente chiede esplicitamente dove si trova un file
-  → Il contesto workspace include TUTTI i file vault con nome e cartella — puoi rispondere
-    a domande come "cosa c'è nella cartella X?" direttamente dal contesto, senza chiamare il tool
-  → Per listare file di una cartella: filtra context.vault dove cartella === "Nome Cartella"
-
-Se non sei sicuro se usare un tool, NON usarlo — rispondi con testo.
-
-## ERRORI DEI TOOL
-Se un tool restituisce un messaggio che inizia con "Errore:", comunicalo chiaramente
-all'utente invece di dire che l'operazione è riuscita.`;
-
-const tools = [
+// ─── Provider configuration ───────────────────────────────────────────────────
+// Groq is primary (free, 30 req/min, 14.400/day). Gemini is automatic fallback.
+const PROVIDERS = [
   {
-    type: "function",
-    function: {
-      name: "create_task",
-      description:
-        "Crea un task nel Kanban Board. Usare SOLO quando l'utente chiede esplicitamente di aggiungere un task/to-do.",
-      parameters: {
-        type: "object",
-        properties: {
-          titolo: { type: "string", description: "Titolo del task" },
-          descrizione: { type: "string", description: "Descrizione opzionale" },
-          stato: {
-            type: "string",
-            enum: ["Da Fare", "In Corso", "Completato"],
-            description: "Stato iniziale, default 'Da Fare'",
-          },
-          scadenza: {
-            type: "string",
-            description: "Data ISO 8601 (es. 2026-05-30T18:00:00). Opzionale.",
-          },
-        },
-        required: ["titolo"],
-      },
-    },
+    endpoint: "https://api.groq.com/openai/v1/chat/completions",
+    apiKey: process.env.GROQ_API_KEY,
+    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
   },
   {
-    type: "function",
-    function: {
-      name: "create_event",
-      description:
-        "Crea un evento nel calendario. Usare SOLO quando l'utente chiede esplicitamente di aggiungere un evento/data in agenda. Se la data non è specificata, chiedila all'utente invece di chiamare questo tool.",
-      parameters: {
-        type: "object",
-        properties: {
-          titolo: { type: "string" },
-          tipo_evento: {
-            type: "string",
-            description: "live | studio | riunione | release | altro",
-          },
-          data_evento: {
-            type: "string",
-            description: "Data e ora ISO 8601. OBBLIGATORIA.",
-          },
-          luogo: { type: "string" },
-          note: { type: "string" },
-        },
-        required: ["titolo", "data_evento"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "search_vault",
-      description:
-        "Cerca documenti nel Vault per nome o parole chiave. Restituisce nome file e cartella.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-        },
-        required: ["query"],
-      },
-    },
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    apiKey: process.env.GOOGLE_AI_KEY,
+    model: process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash",
   },
 ];
 
-type AIMessage =
-  | { role: "system" | "user" | "assistant"; content: string }
-  | { role: "assistant"; content: null; tool_calls: AIToolCall[] }
-  | { role: "tool"; tool_call_id: string; content: string };
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-type AIToolCall = {
-  id: string;
-  type: "function";
-  function: { name: string; arguments: string };
+type AIMessage = { role: "system" | "user" | "assistant"; content: string };
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
+type Intent = "press_kit" | "create_task" | "create_event" | "search_vault" | "general";
+
+type Entities = {
+  artist?: string | null;
+  recipient?: string | null;
+  taskTitle?: string | null;
+  deadline?: string | null;
+  eventTitle?: string | null;
+  eventDate?: string | null;
+  eventVenue?: string | null;
+  eventType?: string | null;
+  searchQuery?: string | null;
 };
 
-export async function POST(request: Request) {
-  const apiKey = process.env.GOOGLE_AI_KEY;
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? _SB_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? _SB_KEY;
-  const model = process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
+type PendingIntent = { type: Intent; entities: Entities };
 
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "GOOGLE_AI_KEY non configurata nelle variabili ambiente." },
-      { status: 500 },
-    );
+type WorkspaceContext = {
+  vault?: Array<{ nome: string; cartella: string }>;
+  tasks?: Array<{ titolo: string; stato: string; scadenza?: string | null }>;
+  eventi?: Array<{ titolo: string; data: string; luogo?: string | null }>;
+  album_in_lavorazione?: Array<{ nome: string }>;
+  discografia?: Array<{
+    nome: string; tipo: string; anno: string | null;
+    spotify: string | null; apple: string | null; bandcamp: string | null;
+  }>;
+  profili?: Array<{
+    nome_arte: string | null; ruolo: string | null; bio: string | null;
+    instagram: string | null; spotify: string | null; email: string | null;
+  }>;
+};
+
+// ─── LLM call with retry + provider fallback ──────────────────────────────────
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+async function callLLM(
+  messages: AIMessage[],
+  opts: { maxTokens?: number; temperature?: number } = {},
+): Promise<string> {
+  const active = PROVIDERS.filter((p) => p.apiKey);
+  if (active.length === 0) throw new Error("Nessun provider AI configurato (GROQ_API_KEY o GOOGLE_AI_KEY mancante).");
+
+  for (const provider of active) {
+    for (let attempt = 0; attempt <= 3; attempt++) {
+      const res = await fetch(provider.endpoint, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: provider.model,
+          temperature: opts.temperature ?? 0.6,
+          max_tokens: opts.maxTokens ?? 1000,
+          messages,
+        }),
+      });
+
+      if (res.status === 429 || res.status === 503 || res.status === 529) {
+        if (attempt < 3) { await sleep([1500, 3000, 5000][attempt]); continue; }
+        break; // exhausted retries → try next provider
+      }
+
+      if (!res.ok) break; // non-retryable error → try next provider
+
+      const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+      return data.choices?.[0]?.message?.content ?? "";
+    }
   }
 
+  throw new Error("Servizio AI temporaneamente non disponibile. Riprova tra qualche secondo.");
+}
+
+// ─── Intent classification ────────────────────────────────────────────────────
+
+async function classifyIntent(message: string): Promise<{ type: Intent; entities: Entities }> {
+  const prompt = `Classifica questo messaggio in uno dei 5 intent e estrai le entità. Rispondi SOLO con JSON, nessun testo extra.
+
+Intent:
+- press_kit: press kit, bio artistica, scheda artista, presentazione artista
+- create_task: crea task, aggiungi to-do, kanban, ricordami di
+- create_event: aggiungi al calendario, crea evento, segna data, live, showcase, sessione studio
+- search_vault: dove sono i file, cerca nel vault, trovami un documento, contratto
+- general: tutto il resto (domande, info, stato del workspace)
+
+Entità (null se assente):
+- artist: nome artista (per press_kit)
+- recipient: destinatario press kit (media/booking/venue/distribuzione)
+- taskTitle: titolo task (per create_task)
+- deadline: data scadenza ISO (per create_task)
+- eventTitle: titolo evento (per create_event)
+- eventDate: data evento ISO (per create_event)
+- eventVenue: luogo (per create_event)
+- eventType: live|studio|riunione|release|altro (per create_event)
+- searchQuery: query ricerca (per search_vault)
+
+Messaggio: "${message.replace(/"/g, "'")}"
+
+JSON:{"type":"general","entities":{"artist":null,"recipient":null,"taskTitle":null,"deadline":null,"eventTitle":null,"eventDate":null,"eventVenue":null,"eventType":null,"searchQuery":null}}`;
+
+  try {
+    const raw = await callLLM([{ role: "user", content: prompt }], { maxTokens: 250, temperature: 0.1 });
+    const cleaned = raw.replace(/```json\n?|\n?```/g, "").trim();
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start === -1 || end === -1) return { type: "general", entities: {} };
+    return JSON.parse(cleaned.slice(start, end + 1)) as { type: Intent; entities: Entities };
+  } catch {
+    return { type: "general", entities: {} };
+  }
+}
+
+// ─── Context checking ─────────────────────────────────────────────────────────
+
+function getMissingFields(type: Intent, entities: Entities): string[] {
+  if (type === "press_kit" && !entities.artist) return ["artist"];
+  if (type === "create_event") {
+    const m: string[] = [];
+    if (!entities.eventTitle) m.push("eventTitle");
+    if (!entities.eventDate) m.push("eventDate");
+    return m;
+  }
+  return [];
+}
+
+function buildQuestion(type: Intent, missing: string[], entities: Entities): string {
+  if (type === "press_kit") {
+    if (missing.includes("artist")) {
+      return "Per quale artista vuoi il press kit?\n(es. Eric Draven, Martire, gg.Proiettili, NONe, Slam, Leony47, Giord, o SUPERFLUIDO come collettivo)";
+    }
+    if (!entities.recipient) {
+      return `Perfetto! A chi è destinato il press kit per **${entities.artist}**?\n- Media / riviste musicali\n- Booking / venue\n- Distribuzione digitale / playlist\n- Uso generico`;
+    }
+  }
+  if (type === "create_event") {
+    if (missing.includes("eventTitle") && missing.includes("eventDate")) {
+      return "Che titolo e data ha l'evento?";
+    }
+    if (missing.includes("eventTitle")) return "Che titolo vuoi dare all'evento?";
+    if (missing.includes("eventDate")) return `Che data e ora ha "${entities.eventTitle}"? (es. 2026-06-15 21:00)`;
+  }
+  return "Puoi darmi qualche dettaglio in più?";
+}
+
+// ─── Handlers ─────────────────────────────────────────────────────────────────
+
+async function handlePressKit(entities: Entities, context: WorkspaceContext): Promise<string> {
+  const artist = entities.artist ?? "SUPERFLUIDO";
+  const recipient = entities.recipient ?? "generico";
+  const year = new Date().getFullYear();
+
+  const profile = context.profili?.find(
+    (p) =>
+      p.nome_arte?.toLowerCase().includes(artist.toLowerCase()) ||
+      artist.toLowerCase().includes((p.nome_arte ?? "").toLowerCase()),
+  );
+
+  const discography = (context.discografia ?? [])
+    .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0))
+    .slice(0, 15);
+
+  const events = (context.eventi ?? []).slice(0, 5);
+
+  const profileInfo = profile
+    ? `Nome d'arte: ${profile.nome_arte}\nRuolo/Strumento: ${profile.ruolo}\nBio: ${profile.bio}\nInstagram: ${profile.instagram}\nSpotify: ${profile.spotify}\nEmail: ${profile.email}`
+    : `Artista del collettivo SUPERFLUIDO. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021. Genere: hip-hop indipendente/underground.\nInstagram: @superfluido_official\nEmail: superfluido@booking.com`;
+
+  const sysPrompt = `Sei un copywriter professionista specializzato in musica hip-hop italiana indipendente.
+Scrivi press kit professionali, credibili e coinvolgenti in italiano corretto.
+Tono: autorevole, diretto, adatto al mondo musicale underground italiano.
+Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi generiche di riempimento.`;
+
+  const userPrompt = `Genera un press kit professionale seguendo ESATTAMENTE questo template (rispetta i titoli delle sezioni):
+
+# ${artist} — Press Kit ${year}
+
+## Biografia
+[Scrivi 350-500 parole. Usa questi dati profilo: ${profileInfo}. Espandi la narrativa artistica, racconta il percorso, lo stile, l'identità sonora. Niente elenchi puntati in questa sezione — solo testo fluido e coinvolgente.]
+
+## Discografia
+${
+    discography.length > 0
+      ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}${d.spotify ? ` · [Spotify](${d.spotify})` : ""}`).join("\n")
+      : "[Discografia in aggiornamento]"
+  }
+
+## Live & Collaborazioni
+[${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi l'approccio live e le collaborazioni rilevanti basandoti sul profilo e sul contesto.]
+
+## Stile & Influenze
+[Analisi del sound, delle influenze e dell'identità artistica. Basati su: ${profile?.ruolo ?? "hip-hop underground, lirismo denso, produzione originale"}.]
+
+## Contatti & Link
+- Email booking: ${profile?.email ?? "superfluido@booking.com"}
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}
+
+---
+NOTA: destinatario del press kit è **${recipient}** — adatta tono ed enfasi di conseguenza.
+Aggiungi esattamente [PRINTABLE] come ultima riga.`;
+
+  return callLLM(
+    [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
+    { maxTokens: 2000, temperature: 0.72 },
+  );
+}
+
+function handleVault(query: string, context: WorkspaceContext): string {
+  const files = context.vault ?? [];
+  const q = query.toLowerCase();
+  const matches = files.filter(
+    (f) => f.nome.toLowerCase().includes(q) || (f.cartella ?? "").toLowerCase().includes(q),
+  );
+  if (matches.length === 0) return `Nessun file trovato per "${query}" nel Vault.`;
+  const list = matches.map((f) => `- **${f.nome}** — cartella: ${f.cartella || "root"}`).join("\n");
+  return `Ho trovato **${matches.length}** file nel Vault:\n\n${list}`;
+}
+
+async function handleGeneral(
+  message: string,
+  history: ChatMessage[],
+  context: WorkspaceContext,
+): Promise<string> {
+  const sysPrompt = `Sei l'assistente operativo di SUPERFLUIDO Bunker — sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO, fondato a Roma nel 2021.
+MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack | Produttori: Leony47, Giord.
+Social: Instagram @superfluido_official | Booking: superfluido@booking.com
+
+Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riempimento.
+
+Contesto workspace attuale:
+${JSON.stringify(context, null, 2)}`;
+
+  const msgs: AIMessage[] = [
+    { role: "system", content: sysPrompt },
+    ...history.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+    { role: "user", content: message },
+  ];
+
+  return callLLM(msgs, { maxTokens: 900, temperature: 0.6 });
+}
+
+// ─── POST handler ─────────────────────────────────────────────────────────────
+
+export async function POST(request: Request) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? _SB_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? _SB_KEY;
+
   const body = (await request.json()) as {
-    messages: Array<{ role: "user" | "assistant"; content: string }>;
-    context?: {
-      vault?: Array<{ nome: string; cartella: string }>;
-      tasks?: Array<{ titolo: string; stato: string; scadenza?: string | null }>;
-      eventi?: Array<{ titolo: string; data: string; luogo?: string | null }>;
-      album_in_lavorazione?: Array<{ nome: string }>;
-      discografia?: Array<{ nome: string; tipo: string; anno: string | null; spotify: string | null; apple: string | null; bandcamp: string | null }>;
-      profili?: Array<{ nome_arte: string | null; ruolo: string | null; bio: string | null; instagram: string | null; spotify: string | null; email: string | null }>;
-    };
+    messages: ChatMessage[];
+    context?: WorkspaceContext;
     userId?: string;
+    pendingIntent?: PendingIntent;
   };
 
   if (!body.messages?.length) {
     return NextResponse.json({ error: "Nessun messaggio." }, { status: 400 });
   }
 
-  const contextStr = body.context
-    ? `\n\nContesto attuale del workspace:\n${JSON.stringify(body.context, null, 2)}`
-    : "";
-
-  const messages: AIMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT + contextStr },
-    ...body.messages,
-  ];
-
-  async function callAI(msgs: AIMessage[], withTools: boolean) {
-    const payload: Record<string, unknown> = {
-      model,
-      temperature: 0.6,
-      max_tokens: 1200,
-      messages: msgs,
-    };
-    if (withTools) {
-      payload.tools = tools;
-      payload.tool_choice = "auto";
-    }
-    const res = await fetch(AI_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Google AI ${res.status}: ${err}`);
-    }
-    return res.json();
-  }
+  const lastMessage = body.messages[body.messages.length - 1];
+  const history = body.messages.slice(0, -1);
+  const context = body.context ?? {};
+  const supabase = supabaseUrl && serviceKey ? createClient(supabaseUrl, serviceKey) : null;
 
   try {
-    const first = await callAI(messages, true);
-    const choice = first.choices?.[0];
+    // ── Step 1: Determine intent ───────────────────────────────────────────────
+    let intentType: Intent;
+    let entities: Entities;
 
-    // ── Tool call branch ──────────────────────────────────────────────────────
-    if (choice?.finish_reason === "tool_calls" && choice.message?.tool_calls?.length) {
-      const supabase =
-        supabaseUrl && serviceKey ? createClient(supabaseUrl, serviceKey) : null;
-
-      const assistantMsg: AIMessage = {
-        role: "assistant",
-        content: null,
-        tool_calls: choice.message.tool_calls,
+    if (body.pendingIntent) {
+      // Mid-conversation: keep intent, merge new entities from latest message
+      intentType = body.pendingIntent.type;
+      const fresh = await classifyIntent(lastMessage.content);
+      entities = {
+        ...body.pendingIntent.entities,
+        ...Object.fromEntries(Object.entries(fresh.entities).filter(([, v]) => v != null)),
       };
-
-      const toolResults: AIMessage[] = [];
-      let actionPerformed = false;
-      let actionMessage = "";
-
-      for (const call of choice.message.tool_calls as AIToolCall[]) {
-        let args: Record<string, string>;
-        try {
-          args = JSON.parse(call.function.arguments);
-        } catch {
-          args = {};
-        }
-
-        let result = "";
-
-        if (call.function.name === "create_task") {
-          if (!supabase) {
-            result = "Errore: SUPABASE_SERVICE_ROLE_KEY mancante.";
-          } else {
-            const { error } = await supabase.from("tasks_kanban").insert({
-              titolo: args.titolo,
-              descrizione: args.descrizione ?? null,
-              stato: args.stato ?? "Da Fare",
-              scadenza: args.scadenza ?? null,
-            });
-            if (error) {
-              result = `Errore creazione task: ${error.message}`;
-            } else {
-              result = `OK — Task "${args.titolo}" aggiunto al Kanban con stato "${args.stato ?? "Da Fare"}".`;
-              actionPerformed = true;
-              actionMessage = `Task "${args.titolo}" creato.`;
-            }
-          }
-        } else if (call.function.name === "create_event") {
-          if (!supabase) {
-            result = "Errore: SUPABASE_SERVICE_ROLE_KEY mancante.";
-          } else {
-            const { error } = await supabase.from("eventi_calendario").insert({
-              titolo: args.titolo,
-              tipo_evento: args.tipo_evento ?? "altro",
-              data_evento: args.data_evento,
-              luogo: args.luogo ?? null,
-              note: args.note ?? null,
-              creato_da: body.userId ?? null,
-            });
-            if (error) {
-              result = `Errore creazione evento: ${error.message}`;
-            } else {
-              result = `OK — Evento "${args.titolo}" aggiunto al calendario per ${args.data_evento}.`;
-              actionPerformed = true;
-              actionMessage = `Evento "${args.titolo}" aggiunto al calendario.`;
-            }
-          }
-        } else if (call.function.name === "search_vault") {
-          const files = body.context?.vault ?? [];
-          const q = (args.query ?? "").toLowerCase();
-          const matches = files.filter(
-            (f) =>
-              f.nome.toLowerCase().includes(q) ||
-              (f.cartella ?? "").toLowerCase().includes(q),
-          );
-          result =
-            matches.length > 0
-              ? matches.map((f) => `"${f.nome}" — cartella: ${f.cartella || "root"}`).join("\n")
-              : `Nessun file trovato per "${args.query}".`;
-        }
-
-        toolResults.push({ role: "tool", tool_call_id: call.id, content: result });
-      }
-
-      const second = await callAI([...messages, assistantMsg, ...toolResults], false);
-      const text = second.choices?.[0]?.message?.content ?? "";
-
-      return NextResponse.json({ text, actionPerformed, actionMessage });
+    } else {
+      const classified = await classifyIntent(lastMessage.content);
+      intentType = classified.type;
+      entities = classified.entities;
     }
 
-    // ── Normal text response ──────────────────────────────────────────────────
-    const text = choice?.message?.content ?? "";
+    // ── Step 2: Check for missing required context ─────────────────────────────
+    const missing = getMissingFields(intentType, entities);
+    // For press_kit: also ask for recipient if artist is known but recipient is not
+    const needsRecipient = intentType === "press_kit" && !!entities.artist && !entities.recipient;
 
-    // Detect printable content (press kit, bio, etc.)
-    const printable = text.includes("[PRINTABLE]");
-    const cleanText = text.replace("[PRINTABLE]", "").trimEnd();
+    if (missing.length > 0 || needsRecipient) {
+      const question = buildQuestion(intentType, missing, entities);
+      return NextResponse.json({
+        text: question,
+        actionPerformed: false,
+        printable: false,
+        pendingIntent: { type: intentType, entities },
+      });
+    }
 
-    return NextResponse.json({ text: cleanText, actionPerformed: false, printable });
+    // ── Step 3: Execute handler ────────────────────────────────────────────────
+    switch (intentType) {
+      case "press_kit": {
+        const raw = await handlePressKit(entities, context);
+        const printable = raw.includes("[PRINTABLE]");
+        const text = raw.replace(/\[PRINTABLE\]/g, "").trimEnd();
+        return NextResponse.json({ text, actionPerformed: false, printable });
+      }
+
+      case "create_task": {
+        const title = entities.taskTitle ?? lastMessage.content.slice(0, 120);
+        if (!supabase) {
+          return NextResponse.json({ text: "Errore: connessione al database non disponibile.", actionPerformed: false, printable: false });
+        }
+        const { error } = await supabase.from("tasks_kanban").insert({
+          titolo: title,
+          stato: "Da Fare",
+          scadenza: entities.deadline ?? null,
+        });
+        if (error) {
+          return NextResponse.json({ text: `Errore nella creazione del task: ${error.message}`, actionPerformed: false, printable: false });
+        }
+        return NextResponse.json({
+          text: `Task **"${title}"** aggiunto al Kanban con stato "Da Fare".${entities.deadline ? ` Scadenza: ${entities.deadline}.` : ""}`,
+          actionPerformed: true,
+          actionMessage: `Task "${title}" creato.`,
+          printable: false,
+        });
+      }
+
+      case "create_event": {
+        const title = entities.eventTitle ?? lastMessage.content.slice(0, 120);
+        const date = entities.eventDate;
+        if (!supabase) {
+          return NextResponse.json({ text: "Errore: connessione al database non disponibile.", actionPerformed: false, printable: false });
+        }
+        if (!date) {
+          return NextResponse.json({ text: "Non ho trovato una data valida. Puoi scriverla nel formato 'gg/mm/aaaa hh:mm'?", actionPerformed: false, printable: false, pendingIntent: { type: intentType, entities } });
+        }
+        const { error } = await supabase.from("eventi_calendario").insert({
+          titolo: title,
+          tipo_evento: entities.eventType ?? "altro",
+          data_evento: date,
+          luogo: entities.eventVenue ?? null,
+          creato_da: body.userId ?? null,
+        });
+        if (error) {
+          return NextResponse.json({ text: `Errore nella creazione dell'evento: ${error.message}`, actionPerformed: false, printable: false });
+        }
+        return NextResponse.json({
+          text: `Evento **"${title}"** aggiunto al calendario per ${date}.${entities.eventVenue ? ` Luogo: ${entities.eventVenue}.` : ""}`,
+          actionPerformed: true,
+          actionMessage: `Evento "${title}" aggiunto al calendario.`,
+          printable: false,
+        });
+      }
+
+      case "search_vault": {
+        const query = entities.searchQuery ?? lastMessage.content;
+        return NextResponse.json({ text: handleVault(query, context), actionPerformed: false, printable: false });
+      }
+
+      default: {
+        const text = await handleGeneral(lastMessage.content, history, context);
+        return NextResponse.json({ text, actionPerformed: false, printable: false });
+      }
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Errore sconosciuto";
     return NextResponse.json({ error: msg }, { status: 500 });

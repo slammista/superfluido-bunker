@@ -1092,15 +1092,18 @@ function PrintPreviewModal({ content, onClose }: { content: string; onClose: () 
   );
 }
 
+type PendingIntent = { type: string; entities: Record<string, string | null | undefined> };
+
 async function sendToAI(
   messages: ChatMessage[],
   context: ReturnType<typeof buildAIContext>,
   userId: string,
-): Promise<{ text: string; actionPerformed: boolean; actionMessage?: string; printable?: boolean }> {
+  pendingIntent?: PendingIntent,
+): Promise<{ text: string; actionPerformed: boolean; actionMessage?: string; printable?: boolean; pendingIntent?: PendingIntent }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context, userId }),
+    body: JSON.stringify({ messages, context, userId, pendingIntent }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Errore AI");
@@ -1124,6 +1127,7 @@ function OverviewAIWidget({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
+  const [pendingIntent, setPendingIntent] = useState<PendingIntent | undefined>(undefined);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1140,18 +1144,19 @@ function OverviewAIWidget({
     setMessages(nextMessages);
     setAiLoading(true);
     try {
-      const data = await sendToAI(nextMessages, buildAIContext(state), user.id);
+      const data = await sendToAI(nextMessages, buildAIContext(state), user.id, pendingIntent);
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: data.text, printable: data.printable },
       ]);
+      setPendingIntent(data.pendingIntent);
       if (data.actionPerformed) {
         await reload();
         onToast(data.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
-      onToast(e instanceof Error ? e.message : "Errore AI");
-      setMessages((prev) => prev.slice(0, -1));
+      console.error("AI error:", e);
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.");
     } finally {
       setAiLoading(false);
     }
@@ -1172,14 +1177,14 @@ function OverviewAIWidget({
         <p className="font-black text-white">AI Assistant</p>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(undefined); }}
             className="ml-2 text-[11px] text-white/30 transition hover:text-white/60"
           >
             Nuova chat
           </button>
         )}
         <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/22">
-          Gemini
+          AI
         </span>
       </div>
 
@@ -1308,6 +1313,7 @@ function AIChatPanel({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
+  const [pendingIntent, setPendingIntent] = useState<PendingIntent | undefined>(undefined);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1324,18 +1330,19 @@ function AIChatPanel({
     setMessages(nextMessages);
     setAiLoading(true);
     try {
-      const data = await sendToAI(nextMessages, buildAIContext(state), user.id);
+      const data = await sendToAI(nextMessages, buildAIContext(state), user.id, pendingIntent);
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: data.text, printable: data.printable },
       ]);
+      setPendingIntent(data.pendingIntent);
       if (data.actionPerformed) {
         await reload();
         onToast(data.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
-      onToast(e instanceof Error ? e.message : "Errore AI");
-      setMessages((prev) => prev.slice(0, -1));
+      console.error("AI error:", e);
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.");
     } finally {
       setAiLoading(false);
     }
@@ -1357,11 +1364,11 @@ function AIChatPanel({
         <Sparkles size={15} className="text-orange-300" />
         <p className="flex-1 text-sm font-black text-white">AI Assistant</p>
         <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
-          Gemini
+          AI
         </span>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(undefined); }}
             className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] font-semibold text-white/40 transition hover:border-orange-500/40 hover:text-orange-300"
           >
             <Plus size={11} />
