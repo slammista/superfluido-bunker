@@ -17,10 +17,23 @@ Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riem
 Non aggiungere MAI disclaimer come "non posso generare PDF" — puoi sempre generare testi.
 
 ## RACCOLTA CONTESTO
-Per richieste di press kit, bio estesa, tech rider o documenti complessi:
-- Se l'utente NON specifica quali artisti includere nella lineup, chiedi PRIMA: "Per quali artisti devo includere la lineup?" — poi genera.
-- Se l'artista è già specificato (es. "press kit per Slam"), genera SUBITO senza fare domande.
+Per richieste di press kit, bio estesa, tech rider o documenti complessi, fai SEMPRE almeno 1-2 domande mirate prima di generare se mancano informazioni chiave:
+- "Per quali artisti/lineup devo generare il press kit?" (se non specificato)
+- "È per un evento specifico, venue o media outlet?" (contestualizza il tono)
+- "Ci sono informazioni aggiuntive o aggiornamenti rispetto ai dati che ho?" (apri a nuovi input)
+- Se l'artista è già specificato (es. "press kit per Slam"), chiedi solo il destinatario/contesto se non indicato.
 - Per richieste semplici (ricerche, task, eventi) rispondi direttamente senza fare domande.
+
+## DOCUMENTI DI RIFERIMENTO (cartella Documenti nel Vault)
+Nella cartella "Documenti" del vault sono presenti questi materiali ufficiali di SUPERFLUIDO:
+- **PRESENTAZIONE Superfluido.pdf** — storia, identità artistica, valori e mission del collettivo
+- **ARTICOLI SUPERFLUIDO.pdf** — rassegna stampa e articoli pubblicati su SUPERFLUIDO
+- **TECH. RIDER X IMBARCHINO.pdf** — rider tecnico e hospitality ufficiale per eventi live
+
+Quando generi press kit, tech rider, bio o comunicati stampa:
+→ Basa le informazioni sui dati del contesto workspace (profili, discografia, eventi)
+→ I documenti nella cartella Documenti contengono le info ufficiali validate — fai riferimento a questi standard quando l'utente chiede documenti formali
+→ Se l'utente chiede "usa le info dei documenti" o "basati sulla presentazione", conferma che usi lo stile e le info da quei materiali
 
 ## GENERAZIONE TESTI E DOCUMENTI
 Per qualsiasi richiesta di: press kit, bio artistica, tech rider, caption social,
@@ -223,14 +236,14 @@ export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? _SB_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? _SB_KEY;
 
-  // Build provider list in priority order (Groq first, Gemini as fallback)
+  // Groq is the sole provider. Gemini is only used if GROQ_API_KEY is not set at all.
   const providers: Provider[] = [
     process.env.GROQ_API_KEY && {
       endpoint: "https://api.groq.com/openai/v1/chat/completions",
       key: process.env.GROQ_API_KEY,
       model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
     },
-    process.env.GOOGLE_AI_KEY && {
+    !process.env.GROQ_API_KEY && process.env.GOOGLE_AI_KEY && {
       endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       key: process.env.GOOGLE_AI_KEY,
       model: process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash",

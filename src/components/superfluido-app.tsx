@@ -125,6 +125,10 @@ export function SuperfluidoApp() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [view]);
+
   function showToast(text: string, kind: "error" | "success" = "error") {
     setToast({ text, kind });
     setTimeout(() => setToast(null), 4000);
@@ -1070,12 +1074,15 @@ function PrintPreviewModal({ content, onClose }: { content: string; onClose: () 
   const html = markdownToHtml(content);
 
   function downloadHtml() {
-    const fullHtml = `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO</title><style>body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff;max-width:800px;margin:0 auto;padding:48px 32px}h1{font-size:1.9rem;font-weight:900;font-family:Arial,sans-serif;border-bottom:3px solid #111;padding-bottom:.4em;margin:0 0 1em}h2{font-size:1.2rem;font-weight:700;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.08em;margin:2em 0 .7em;color:#333}h3{font-size:1rem;font-weight:700;font-family:Arial,sans-serif;margin:1.5em 0 .5em}p{margin:.7em 0;line-height:1.8}ul{padding-left:1.6em;margin:.7em 0}li{margin:.35em 0;line-height:1.8}strong{font-weight:700}em{font-style:italic}code{background:#f0f0f0;padding:.15em .4em;border-radius:3px;font-family:monospace;font-size:.88em}</style></head><body>${html}</body></html>`;
+    const today = new Date();
+    const [year, month, day] = today.toISOString().split("T")[0].split("-");
+    const italianDate = `${day}/${month}/${year}`;
+    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
     const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "press-kit-superfluido.html";
+    a.download = `press-kit-superfluido-${today.toISOString().split("T")[0]}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1099,12 +1106,23 @@ function PrintPreviewModal({ content, onClose }: { content: string; onClose: () 
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Apri il file scaricato nel browser per salvarlo come PDF</span>
+          <span className="text-xs text-gray-400">Apri il file scaricato → stampa → salva come PDF</span>
         </div>
-        <div
-          className="prose-sf"
-          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: "#111", lineHeight: "1.8" }}
-          dangerouslySetInnerHTML={{ __html: html }}
+        {/* Branded preview */}
+        <div style={{ borderTop: "5px solid #f97316", marginBottom: "0" }} />
+        <div style={{ padding: "32px 0 8px", borderBottom: "1px solid #e5e5e5", marginBottom: "32px" }}>
+          <div style={{ fontSize: "9px", fontFamily: "Helvetica,Arial,sans-serif", letterSpacing: ".4em", textTransform: "uppercase" as const, color: "#f97316", fontWeight: 700, marginBottom: "10px" }}>
+            SUPERFLUIDO · BUNKER OPERATING SYSTEM
+          </div>
+          <div style={{ fontSize: "40px", fontWeight: 900, lineHeight: "1", letterSpacing: "-1.5px", fontFamily: "Helvetica,Arial,sans-serif", color: "#000" }}>
+            MEDIA PRESS KIT
+          </div>
+          <div style={{ marginTop: "12px", fontSize: "11px", color: "#999", fontFamily: "Helvetica,Arial,sans-serif" }}>
+            {new Date().toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })}
+          </div>
+        </div>
+        <div style={{ fontFamily: "Georgia,'Times New Roman',serif", color: "#111", lineHeight: "1.85" }}
+          dangerouslySetInnerHTML={{ __html: html.replace(/<h1>/g, '<h1 style="font-size:20px;font-weight:900;font-family:Helvetica,Arial,sans-serif;border-left:4px solid #f97316;padding-left:14px;margin:32px 0 12px;color:#000">').replace(/<h2>/g, '<h2 style="font-size:11px;font-weight:700;font-family:Helvetica,Arial,sans-serif;text-transform:uppercase;letter-spacing:.14em;color:#f97316;margin:24px 0 8px">').replace(/<h3>/g, '<h3 style="font-size:10px;font-weight:700;font-family:Helvetica,Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#888;margin:18px 0 6px">').replace(/<p>/g, '<p style="font-size:14px;line-height:1.85;color:#222;margin-bottom:12px">').replace(/<li>/g, '<li style="font-size:14px;line-height:1.75;margin-bottom:5px">') }}
         />
       </div>
     </div>
@@ -1585,6 +1603,7 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
   const [saving, setSaving] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [updatingProduct, setUpdatingProduct] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
   const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
 
   async function addProduct(event: FormEvent<HTMLFormElement>) {
@@ -1786,16 +1805,29 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
           </div>
         </div>
 
-        <form onSubmit={addProduct} className="glass rounded-md p-5">
-          <p className="text-lg font-black text-white">Nuovo prodotto</p>
-          <p className="mt-1 text-sm text-white/50">Creazione rapida su Supabase per merch e supporti fisici.</p>
-          <Input name="name" label="Nome" required />
-          <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
-          <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
-          <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
-          <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
-          <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
-        </form>
+        <div className="glass rounded-md">
+          <button
+            type="button"
+            onClick={() => setShowAddForm((v) => !v)}
+            className="flex w-full items-center justify-between px-5 py-4 lg:hidden"
+          >
+            <span className="text-sm font-black text-white">+ Nuovo prodotto</span>
+            <ChevronRight size={16} className={`text-white/40 transition-transform duration-200 ${showAddForm ? "rotate-90" : ""}`} />
+          </button>
+          <form
+            onSubmit={addProduct}
+            className={`p-5 ${showAddForm ? "block" : "hidden"} lg:block`}
+          >
+            <p className="hidden text-lg font-black text-white lg:block">Nuovo prodotto</p>
+            <p className="mt-1 hidden text-sm text-white/50 lg:block">Creazione rapida su Supabase per merch e supporti fisici.</p>
+            <Input name="name" label="Nome" required />
+            <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
+            <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
+            <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
+            <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
+            <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
+          </form>
+        </div>
       </div>
     </>
   );
@@ -3213,6 +3245,33 @@ function Distrib({
   );
 }
 
+// Shared branded HTML wrapper — used by both PrintPreviewModal and PressKit
+function buildPressKitHtmlStyled(htmlBody: string, italianDate: string): string {
+  const css = `
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}
+    .accent-bar{height:6px;background:#f97316}
+    .page{max-width:780px;margin:0 auto;padding:48px 60px 60px}
+    .hdr{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:28px;border-bottom:1px solid #e5e5e5;margin-bottom:40px}
+    .brand-tag{font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.38em;text-transform:uppercase;color:#f97316;font-weight:700;margin-bottom:14px}
+    .pk-title{font-size:52px;font-weight:900;line-height:.92;letter-spacing:-2px;font-family:'Helvetica Neue',Arial,sans-serif;color:#000}
+    .hdr-meta{text-align:right;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;line-height:1.8}
+    .content h1{font-size:20px;font-weight:900;font-family:'Helvetica Neue',Arial,sans-serif;border-left:4px solid #f97316;padding-left:14px;margin:38px 0 12px;color:#000;line-height:1.2}
+    .content h2{font-size:11px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.15em;color:#f97316;margin:26px 0 8px}
+    .content h3{font-size:10px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#888;margin:20px 0 6px}
+    .content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}
+    .content ul{margin:4px 0 16px 0;list-style:none;padding:0}
+    .content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:6px;padding-left:18px;position:relative}
+    .content li::before{content:"—";position:absolute;left:0;color:#f97316;font-weight:700}
+    .content hr{border:none;border-top:1px solid #e5e5e5;margin:28px 0}
+    .content strong{font-weight:700;color:#000}
+    .content em{font-style:italic}
+    .footer{margin-top:56px;padding-top:16px;border-top:2px solid #f97316;font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.1em}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:36px 48px}}
+  `;
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>superfluido-bunker.vercel.app<br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div></body></html>`;
+}
+
 // FIX 5: PressKit con download .txt e salvataggio nel vault
 function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [prompt, setPrompt] = useState("Genera un press kit sintetico per la prossima release, includendo bio, pitch editoriale, punti forza e caption social.");
@@ -3250,21 +3309,12 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
   }
 
   function buildPressKitHtml(content: string, italianDate: string): string {
-    // Markdown → HTML converter
-    function esc(s: string) {
-      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function inline(s: string) {
-      return esc(s)
-        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*(.+?)\*/g, "<em>$1</em>");
-    }
+    function esc(s: string) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function inline(s: string) { return esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>"); }
     const lines = content.split("\n");
     const chunks: string[] = [];
     const listBuf: string[] = [];
-    function flushList() {
-      if (listBuf.length) { chunks.push("<ul>" + listBuf.join("") + "</ul>"); listBuf.length = 0; }
-    }
+    function flushList() { if (listBuf.length) { chunks.push("<ul>" + listBuf.join("") + "</ul>"); listBuf.length = 0; } }
     for (const line of lines) {
       const t = line.trim();
       if (t.startsWith("### ")) { flushList(); chunks.push(`<h3>${inline(t.slice(4))}</h3>`); }
@@ -3277,9 +3327,7 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
       else { flushList(); chunks.push(`<p>${inline(t)}</p>`); }
     }
     flushList();
-    const body = chunks.join("\n");
-    const css = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}.page{max-width:760px;margin:0 auto;padding:60px 50px}.hdr{border-bottom:3px solid #f97316;padding-bottom:24px;margin-bottom:40px}.brand{font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#f97316;margin-bottom:8px;font-weight:700}.pk-title{font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;font-family:'Helvetica Neue',Arial,sans-serif}.dt{font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:#888;margin-top:10px}.content h1{font-size:26px;font-weight:900;margin:32px 0 10px;font-family:'Helvetica Neue',Arial,sans-serif}.content h2{font-size:20px;font-weight:800;margin:28px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif}.content h3{font-size:12px;font-weight:700;margin:26px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#f97316}.content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}.content ul{margin:4px 0 16px 20px}.content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:5px}.content hr{border:none;border-top:1px solid #e5e5e5;margin:20px 0}.content strong{font-weight:700;color:#000}.content em{font-style:italic}.footer{margin-top:50px;padding-top:18px;border-top:1px solid #e5e5e5;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:40px}}`;
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>${css}</style></head><body><div class="page"><div class="hdr"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="pk-title">Media Press Kit</div><div class="dt">Generato il ${esc(italianDate)}</div></div><div class="content">${body}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${esc(italianDate)}</span></div></div></body></html>`;
+    return buildPressKitHtmlStyled(chunks.join("\n"), italianDate);
   }
 
   function downloadPdf() {
@@ -4182,7 +4230,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label: str
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <input className={`field mt-2 rounded-md px-3 py-2.5 text-sm ${className ?? ""}`} {...inputProps} />
+      <input className={`field mt-2 rounded-md px-3 py-2.5 text-base sm:text-sm ${className ?? ""}`} {...inputProps} />
     </label>
   );
 }
@@ -4192,7 +4240,7 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { l
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <textarea className={`field mt-2 min-h-28 rounded-md px-3 py-2.5 text-sm ${className ?? ""}`} {...textareaProps} />
+      <textarea className={`field mt-2 min-h-28 rounded-md px-3 py-2.5 text-base sm:text-sm ${className ?? ""}`} {...textareaProps} />
     </label>
   );
 }
@@ -4201,7 +4249,7 @@ function Select({ label, name, options, defaultValue }: { label: string; name: s
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <select name={name} defaultValue={defaultValue} className="field mt-2 rounded-md px-3 py-2.5 text-sm">
+      <select name={name} defaultValue={defaultValue} className="field mt-2 rounded-md px-3 py-2.5 text-base sm:text-sm">
         {options.map((option) => (
           <option key={option} value={option} className="bg-neutral-950">
             {option}
