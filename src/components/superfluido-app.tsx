@@ -1069,39 +1069,29 @@ function markdownToHtml(md: string): string {
 function PrintPreviewModal({ content, onClose }: { content: string; onClose: () => void }) {
   const html = markdownToHtml(content);
 
-  useEffect(() => {
-    const style = document.createElement("style");
-    style.id = "sf-print-style";
-    style.textContent = `
-      .sf-prose { font-family: Georgia, "Times New Roman", serif; color: #111; line-height: 1.8; }
-      .sf-prose h1 { font-size: 1.9rem; font-weight: 900; font-family: Arial, sans-serif; border-bottom: 3px solid #111; padding-bottom: 0.4em; margin: 0 0 1em; }
-      .sf-prose h2 { font-size: 1.2rem; font-weight: 700; font-family: Arial, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; margin: 2em 0 0.7em; color: #333; }
-      .sf-prose h3 { font-size: 1rem; font-weight: 700; font-family: Arial, sans-serif; margin: 1.5em 0 0.5em; }
-      .sf-prose p  { margin: 0.7em 0; }
-      .sf-prose ul { padding-left: 1.6em; margin: 0.7em 0; }
-      .sf-prose li { margin: 0.35em 0; }
-      .sf-prose strong { font-weight: 700; }
-      .sf-prose em { font-style: italic; }
-      .sf-prose code { background: #f0f0f0; padding: 0.15em 0.4em; border-radius: 3px; font-family: monospace; font-size: 0.88em; }
-      @media print {
-        body > *:not(#sf-print-modal) { display: none !important; }
-        #sf-print-modal { position: static !important; overflow: visible !important; background: white !important; }
-        #sf-print-controls { display: none !important; }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => document.getElementById("sf-print-style")?.remove();
-  }, []);
+  function downloadHtml() {
+    const fullHtml = `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO</title><style>body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff;max-width:800px;margin:0 auto;padding:48px 32px}h1{font-size:1.9rem;font-weight:900;font-family:Arial,sans-serif;border-bottom:3px solid #111;padding-bottom:.4em;margin:0 0 1em}h2{font-size:1.2rem;font-weight:700;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.08em;margin:2em 0 .7em;color:#333}h3{font-size:1rem;font-weight:700;font-family:Arial,sans-serif;margin:1.5em 0 .5em}p{margin:.7em 0;line-height:1.8}ul{padding-left:1.6em;margin:.7em 0}li{margin:.35em 0;line-height:1.8}strong{font-weight:700}em{font-style:italic}code{background:#f0f0f0;padding:.15em .4em;border-radius:3px;font-family:monospace;font-size:.88em}</style></head><body>${html}</body></html>`;
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "press-kit-superfluido.html";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   return (
-    <div id="sf-print-modal" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
-      <div className="mx-auto max-w-2xl px-8 py-8">
-        <div id="sf-print-controls" className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
+    <div className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
+      <div className="mx-auto max-w-2xl px-6 py-8 sm:px-8">
+        <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
           <button
-            onClick={() => window.print()}
-            className="rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
+            onClick={downloadHtml}
+            className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
           >
-            Stampa / Salva PDF
+            <Download size={15} />
+            Scarica
           </button>
           <button
             onClick={onClose}
@@ -1109,9 +1099,13 @@ function PrintPreviewModal({ content, onClose }: { content: string; onClose: () 
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Su mobile: Stampa → Salva come PDF</span>
+          <span className="text-xs text-gray-400">Apri il file scaricato nel browser per salvarlo come PDF</span>
         </div>
-        <div className="sf-prose" dangerouslySetInnerHTML={{ __html: html }} />
+        <div
+          className="prose-sf"
+          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: "#111", lineHeight: "1.8" }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       </div>
     </div>
   );
@@ -3285,17 +3279,23 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
     flushList();
     const body = chunks.join("\n");
     const css = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}.page{max-width:760px;margin:0 auto;padding:60px 50px}.hdr{border-bottom:3px solid #f97316;padding-bottom:24px;margin-bottom:40px}.brand{font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#f97316;margin-bottom:8px;font-weight:700}.pk-title{font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;font-family:'Helvetica Neue',Arial,sans-serif}.dt{font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:#888;margin-top:10px}.content h1{font-size:26px;font-weight:900;margin:32px 0 10px;font-family:'Helvetica Neue',Arial,sans-serif}.content h2{font-size:20px;font-weight:800;margin:28px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif}.content h3{font-size:12px;font-weight:700;margin:26px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#f97316}.content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}.content ul{margin:4px 0 16px 20px}.content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:5px}.content hr{border:none;border-top:1px solid #e5e5e5;margin:20px 0}.content strong{font-weight:700;color:#000}.content em{font-style:italic}.footer{margin-top:50px;padding-top:18px;border-top:1px solid #e5e5e5;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:40px}}`;
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>${css}</style></head><body><div class="page"><div class="hdr"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="pk-title">Media Press Kit</div><div class="dt">Generato il ${esc(italianDate)}</div></div><div class="content">${body}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${esc(italianDate)}</span></div></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>${css}</style></head><body><div class="page"><div class="hdr"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="pk-title">Media Press Kit</div><div class="dt">Generato il ${esc(italianDate)}</div></div><div class="content">${body}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${esc(italianDate)}</span></div></div></body></html>`;
   }
 
   function downloadPdf() {
     const today = new Date();
     const [year, month, day] = today.toISOString().split("T")[0].split("-");
     const italianDate = `${day}/${month}/${year}`;
-    const win = window.open("", "_blank");
-    if (!win) { onToast("Popup bloccato. Abilita i popup per generare il PDF."); return; }
-    win.document.write(buildPressKitHtml(answer, italianDate));
-    win.document.close();
+    const html = buildPressKitHtml(answer, italianDate);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `press-kit-superfluido-${today.toISOString().split("T")[0]}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function saveToVault() {

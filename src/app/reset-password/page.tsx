@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
 import Image from "next/image";
-import { Loader2, ChevronRight } from "lucide-react";
+import { Loader2, ChevronRight, CheckCircle2, AlertCircle } from "lucide-react";
 import { getSupabase } from "@/lib/supabase";
 
 export default function ResetPasswordPage() {
@@ -39,11 +39,12 @@ export default function ResetPasswordPage() {
     const { error } = await getSupabase().auth.updateUser({ password });
     setLoading(false);
     if (error) {
-      setMessage(error.message);
+      console.error("Password update error:", error.message);
+      setMessage("Cambio password non riuscito, contatta Fratm Slam");
     } else {
       setSuccess(true);
-      setMessage("Password aggiornata! Reindirizzamento...");
-      setTimeout(() => { window.location.href = "/"; }, 1500);
+      setMessage("Password cambiata con successo");
+      setTimeout(() => { window.location.href = "/"; }, 2500);
     }
   }
 
@@ -62,9 +63,10 @@ export default function ResetPasswordPage() {
         </p>
 
         {message && (
-          <p className={`mt-4 rounded-md px-4 py-3 text-sm font-semibold ${success ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+          <div className={`mt-4 flex items-start gap-3 rounded-md border px-4 py-3 text-sm font-semibold ${success ? "border-green-500/30 bg-green-500/15 text-green-300" : "border-red-500/30 bg-red-500/15 text-red-300"}`}>
+            {success ? <CheckCircle2 size={17} className="mt-0.5 shrink-0" /> : <AlertCircle size={17} className="mt-0.5 shrink-0" />}
             {message}
-          </p>
+          </div>
         )}
 
         {ready && !success && (
