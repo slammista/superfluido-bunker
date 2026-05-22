@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const AI_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-
-// These values are already committed to the repository in scripts/ — not a new exposure.
-// They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
+// Fallbacks already committed in scripts/ — not a new exposure.
 const _SB_URL = "https://jbugnzagefqkvimaqyki.supabase.co";
 const _SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpidWduemFnZWZxa3ZpbWFxeWtpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTAxMjQ2OCwiZXhwIjoyMDkwNTg4NDY4fQ.QuR9u2mY_Zt5RUxKD0v0H5GcEvi-cvDPTvQnCeoZyNA";
 
@@ -17,6 +13,13 @@ Social: Instagram @superfluido_official | Booking: superfluido@booking.com
 ## LINGUA
 Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riempimento.
 Non aggiungere MAI disclaimer come "non posso generare PDF" — puoi sempre generare testi.
+
+## RACCOLTA CONTESTO
+Per richieste di press kit, bio estesa, tech rider o documenti complessi:
+- Se mancano informazioni chiave (destinatario, obiettivo, venue, data), fai 1-2 domande mirate PRIMA di generare.
+- Esempio: "Per quale venue/festival è il press kit?" oppure "È per uso media, booking o streaming?"
+- Se il workspace ha già le informazioni necessarie, non chiedere di nuovo.
+- Per richieste semplici (ricerche, task, eventi) rispondi direttamente senza fare domande.
 
 ## GENERAZIONE TESTI E DOCUMENTI
 Per qualsiasi richiesta di: press kit, bio artistica, tech rider, caption social,
@@ -30,11 +33,11 @@ comunicato stampa, CV, documento, PDF, testo formattato →
 ## STRUTTURA PRESS KIT (quando richiesto)
 # [Nome Artista / SUPERFLUIDO] — Press Kit [Anno]
 ## Biografia
-[testo dalla bio_breve del profilo + espansione artistica]
+[testo dalla bio_breve del profilo + espansione artistica — MINIMO 300 parole, tono professionale per media e booking]
 ## Discografia
-[lista degli album/singoli dalla discografia nel contesto, con anno]
+[lista degli album/singoli dalla discografia nel contesto, con anno e link se disponibili]
 ## Stile & Influenze
-[analisi del sound basata su strumentazione/ruolo del profilo]
+[analisi del sound basata su strumentazione/ruolo del profilo, con riferimenti al contesto hip-hop italiano]
 ## Live & Collaborazioni
 [eventi futuri dal contesto + note collaborative]
 ## Contatti & Link
@@ -62,6 +65,8 @@ Se non sei sicuro se usare un tool, NON usarlo — rispondi con testo.
 Se un tool restituisce un messaggio che inizia con "Errore:", comunicalo chiaramente
 all'utente invece di dire che l'operazione è riuscita.`;
 
+// ── SSE helper ────────────────────────────────────────────────────────────────
+
 function textToSSEStream(
   text: string,
   meta: { printable: boolean; actionPerformed: boolean; actionMessage: string },
@@ -86,6 +91,8 @@ function textToSSEStream(
     },
   });
 }
+
+// ── Tools ─────────────────────────────────────────────────────────────────────
 
 const tools = [
   {
@@ -155,6 +162,8 @@ const tools = [
   },
 ];
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 type AIMessage =
   | { role: "system" | "user" | "assistant"; content: string }
   | { role: "assistant"; content: null; tool_calls: AIToolCall[] }
@@ -166,15 +175,35 @@ type AIToolCall = {
   function: { name: string; arguments: string };
 };
 
+type Provider = { endpoint: string; key: string; model: string };
+
+// ── POST ──────────────────────────────────────────────────────────────────────
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const RETRYABLE = new Set([429, 503, 529]);
+const RETRY_DELAYS = [1500, 3000, 5000];
+
 export async function POST(request: Request) {
-  const apiKey = process.env.GOOGLE_AI_KEY;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? _SB_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? _SB_KEY;
-  const model = process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";
 
-  if (!apiKey) {
+  // Build provider list in priority order (Groq first, Gemini as fallback)
+  const providers: Provider[] = [
+    process.env.GROQ_API_KEY && {
+      endpoint: "https://api.groq.com/openai/v1/chat/completions",
+      key: process.env.GROQ_API_KEY,
+      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+    },
+    process.env.GOOGLE_AI_KEY && {
+      endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      key: process.env.GOOGLE_AI_KEY,
+      model: process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash",
+    },
+  ].filter(Boolean) as Provider[];
+
+  if (providers.length === 0) {
     return NextResponse.json(
-      { error: "GOOGLE_AI_KEY non configurata nelle variabili ambiente." },
+      { error: "Nessuna chiave AI configurata (GROQ_API_KEY o GOOGLE_AI_KEY)." },
       { status: 500 },
     );
   }
@@ -205,45 +234,76 @@ export async function POST(request: Request) {
     ...body.messages,
   ];
 
-  async function callAI(msgs: AIMessage[], withTools: boolean) {
-    const payload: Record<string, unknown> = {
-      model,
-      temperature: 0.6,
-      max_tokens: 1200,
-      messages: msgs,
-    };
-    if (withTools) {
-      payload.tools = tools;
-      payload.tool_choice = "auto";
+  // callAI: non-streaming, tries all providers with retry on transient errors
+  async function callAI(msgs: AIMessage[], withTools: boolean): Promise<unknown> {
+    let lastError: Error = new Error("Nessun provider AI disponibile.");
+    for (const provider of providers) {
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        try {
+          const payload: Record<string, unknown> = {
+            model: provider.model,
+            temperature: 0.6,
+            max_tokens: 1200,
+            messages: msgs,
+          };
+          if (withTools) { payload.tools = tools; payload.tool_choice = "auto"; }
+          const res = await fetch(provider.endpoint, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${provider.key}`, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (RETRYABLE.has(res.status) && attempt < 2) {
+            await sleep(RETRY_DELAYS[attempt]);
+            continue;
+          }
+          if (!res.ok) {
+            const err = await res.text();
+            lastError = new Error(`AI ${res.status}: ${err.slice(0, 200)}`);
+            break; // try next provider
+          }
+          return res.json();
+        } catch (e) {
+          lastError = e instanceof Error ? e : new Error(String(e));
+          break; // network error — try next provider
+        }
+      }
     }
-    const res = await fetch(AI_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Google AI ${res.status}: ${err}`);
-    }
-    return res.json();
+    throw lastError;
   }
 
-  async function callAIStreamRaw(msgs: AIMessage[]) {
-    const payload = { model, temperature: 0.6, max_tokens: 1200, messages: msgs, stream: true };
-    const res = await fetch(AI_ENDPOINT, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) { const err = await res.text(); throw new Error(`Google AI ${res.status}: ${err}`); }
-    return res;
+  // callAIStreamRaw: streaming fetch, same retry + fallback logic
+  async function callAIStreamRaw(msgs: AIMessage[]): Promise<Response> {
+    let lastError: Error = new Error("Nessun provider AI disponibile.");
+    for (const provider of providers) {
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        try {
+          const payload = { model: provider.model, temperature: 0.6, max_tokens: 1200, messages: msgs, stream: true };
+          const res = await fetch(provider.endpoint, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${provider.key}`, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (RETRYABLE.has(res.status) && attempt < 2) {
+            await sleep(RETRY_DELAYS[attempt]);
+            continue;
+          }
+          if (!res.ok) {
+            const err = await res.text();
+            lastError = new Error(`AI ${res.status}: ${err.slice(0, 200)}`);
+            break;
+          }
+          return res;
+        } catch (e) {
+          lastError = e instanceof Error ? e : new Error(String(e));
+          break;
+        }
+      }
+    }
+    throw lastError;
   }
 
   try {
-    const first = await callAI(messages, true);
+    const first = await callAI(messages, true) as { choices?: Array<{ finish_reason: string; message?: { content?: string; tool_calls?: AIToolCall[] } }> };
     const choice = first.choices?.[0];
 
     // ── Tool call branch ──────────────────────────────────────────────────────
@@ -326,7 +386,7 @@ export async function POST(request: Request) {
         toolResults.push({ role: "tool", tool_call_id: call.id, content: result });
       }
 
-      const second = await callAI([...messages, assistantMsg, ...toolResults], false);
+      const second = await callAI([...messages, assistantMsg, ...toolResults], false) as { choices?: Array<{ message?: { content?: string } }> };
       const text = second.choices?.[0]?.message?.content ?? "";
 
       const printable = text.includes("[PRINTABLE]");
@@ -337,7 +397,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── Normal text response — streaming ────────────────────────────────────
+    // ── Normal text response — streaming ─────────────────────────────────────
     const streamRes = await callAIStreamRaw(messages);
     const encoder = new TextEncoder();
     let sseBuffer = "";

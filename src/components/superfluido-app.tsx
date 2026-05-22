@@ -1211,7 +1211,8 @@ function OverviewAIWidget({
         onToast(meta.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
-      onToast(e instanceof Error ? e.message : "Errore AI");
+      console.error("AI error:", e);
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.", "error");
       setMessages((prev) => prev.slice(0, -1));
     } finally {
       setAiLoading(false);
@@ -1410,7 +1411,8 @@ function AIChatPanel({
         onToast(meta.actionMessage ?? "Operazione completata.", "success");
       }
     } catch (e) {
-      onToast(e instanceof Error ? e.message : "Errore AI");
+      console.error("AI error:", e);
+      onToast("Servizio AI momentaneamente occupato. Riprova tra qualche secondo.", "error");
       setMessages((prev) => prev.slice(0, -1));
     } finally {
       setAiLoading(false);
