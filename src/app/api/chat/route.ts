@@ -105,7 +105,7 @@ all'utente invece di dire che l'operazione è riuscita.`;
 
 function textToSSEStream(
   text: string,
-  meta: { printable: boolean; actionPerformed: boolean; actionMessage: string },
+  meta: { printable: boolean; actionPerformed: boolean; actionMessage: string; provider?: string },
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -270,6 +270,9 @@ export async function POST(request: Request) {
     ...body.messages,
   ];
 
+  // Tracks which provider answered (used in SSE done event so client can show the label)
+  let activeProvider = "AI";
+
   // callAI: non-streaming, tries all providers with retry on transient errors
   async function callAI(msgs: AIMessage[], withTools: boolean): Promise<unknown> {
     let lastError: Error = new Error("Nessun provider AI disponibile.");
@@ -297,6 +300,7 @@ export async function POST(request: Request) {
             lastError = new Error(`AI ${res.status}: ${err.slice(0, 200)}`);
             break; // try next provider
           }
+          activeProvider = provider.endpoint.includes("groq") ? "Groq" : "Gemini";
           return res.json();
         } catch (e) {
           lastError = e instanceof Error ? e : new Error(String(e));
@@ -328,6 +332,7 @@ export async function POST(request: Request) {
             lastError = new Error(`AI ${res.status}: ${err.slice(0, 200)}`);
             break;
           }
+          activeProvider = provider.endpoint.includes("groq") ? "Groq" : "Gemini";
           return res;
         } catch (e) {
           lastError = e instanceof Error ? e : new Error(String(e));
@@ -391,7 +396,7 @@ export async function POST(request: Request) {
           } else {
             const { error } = await supabase.from("eventi_calendario").insert({
               titolo: args.titolo,
-              tipo_evento: args.tipo_evento ?? "altro",
+              tipo_evento: args.tipo_evento ?? null,
               data_evento: args.data_evento,
               luogo: args.luogo ?? null,
               note: args.note ?? null,
@@ -428,7 +433,7 @@ export async function POST(request: Request) {
       const printable = text.includes("[PRINTABLE]");
       const cleanText = text.replace("[PRINTABLE]", "").trimEnd();
       return new Response(
-        textToSSEStream(cleanText, { printable, actionPerformed, actionMessage }),
+        textToSSEStream(cleanText, { printable, actionPerformed, actionMessage, provider: activeProvider }),
         { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" } },
       );
     }
@@ -454,7 +459,7 @@ export async function POST(request: Request) {
             if (data === "[DONE]") {
               const printable = fullText.includes("[PRINTABLE]");
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "" })}\n\n`),
+                encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "", provider: activeProvider })}\n\n`),
               );
               controller.close();
               return;
@@ -475,7 +480,7 @@ export async function POST(request: Request) {
         // Fallback if [DONE] never arrives
         const printable = fullText.includes("[PRINTABLE]");
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "" })}\n\n`),
+          encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "", provider: activeProvider })}\n\n`),
         );
         controller.close();
       },

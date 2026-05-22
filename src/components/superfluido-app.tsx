@@ -1122,7 +1122,7 @@ async function sendToAI(
   context: ReturnType<typeof buildAIContext>,
   userId: string,
   onChunk: (chunk: string) => void,
-): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean }> {
+): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; provider?: string }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1133,7 +1133,8 @@ async function sendToAI(
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let meta = { actionPerformed: false, actionMessage: "", printable: false };
+  let meta: { actionPerformed: boolean; actionMessage: string; printable: boolean; provider: string } =
+    { actionPerformed: false, actionMessage: "", printable: false, provider: "AI" };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1144,9 +1145,9 @@ async function sendToAI(
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       try {
-        const parsed = JSON.parse(line.slice(6)) as { type: string; text?: string; actionPerformed?: boolean; actionMessage?: string; printable?: boolean };
+        const parsed = JSON.parse(line.slice(6)) as { type: string; text?: string; actionPerformed?: boolean; actionMessage?: string; printable?: boolean; provider?: string };
         if (parsed.type === "chunk") onChunk(parsed.text ?? "");
-        else if (parsed.type === "done") meta = { actionPerformed: parsed.actionPerformed ?? false, actionMessage: parsed.actionMessage ?? "", printable: parsed.printable ?? false };
+        else if (parsed.type === "done") meta = { actionPerformed: parsed.actionPerformed ?? false, actionMessage: parsed.actionMessage ?? "", printable: parsed.printable ?? false, provider: parsed.provider ?? "AI" };
       } catch { /* ignore */ }
     }
   }
@@ -1170,6 +1171,7 @@ function OverviewAIWidget({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
+  const [aiProvider, setAiProvider] = useState("AI");
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1186,11 +1188,13 @@ function OverviewAIWidget({
     setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
     setAiLoading(true);
     try {
+      let streamedContent = "";
       const meta = await sendToAI(
         nextMessages,
         buildAIContext(state),
         user.id,
         (chunk) => {
+          streamedContent += chunk;
           setMessages((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -1206,6 +1210,8 @@ function OverviewAIWidget({
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
+      if (meta.provider) setAiProvider(meta.provider);
+      if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
         onToast(meta.actionMessage ?? "Operazione completata.", "success");
@@ -1241,7 +1247,7 @@ function OverviewAIWidget({
           </button>
         )}
         <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.14em] text-white/22">
-          Gemini
+          {aiProvider}
         </span>
       </div>
 
@@ -1370,6 +1376,7 @@ function AIChatPanel({
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
+  const [aiProvider, setAiProvider] = useState("AI");
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1386,11 +1393,13 @@ function AIChatPanel({
     setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
     setAiLoading(true);
     try {
+      let streamedContent = "";
       const meta = await sendToAI(
         nextMessages,
         buildAIContext(state),
         user.id,
         (chunk) => {
+          streamedContent += chunk;
           setMessages((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -1406,6 +1415,8 @@ function AIChatPanel({
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
+      if (meta.provider) setAiProvider(meta.provider);
+      if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
         onToast(meta.actionMessage ?? "Operazione completata.", "success");
@@ -1435,7 +1446,7 @@ function AIChatPanel({
         <Sparkles size={15} className="text-orange-300" />
         <p className="flex-1 text-sm font-black text-white">AI Assistant</p>
         <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/25">
-          Gemini
+          {aiProvider}
         </span>
         {messages.length > 0 && (
           <button
