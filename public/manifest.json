@@ -1,0 +1,21 @@
+{
+  "name": "SUPERFLUIDO Bunker",
+  "short_name": "Bunker",
+  "description": "ERP operativo del collettivo SUPERFLUIDO",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#060606",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "/assets/logo_login.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/logo_login.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

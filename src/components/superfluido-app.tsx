@@ -206,6 +206,14 @@ export function SuperfluidoApp() {
         }
         loadWorkspace(uid);
       })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks_kanban" }, (payload) => {
+        const task = payload.new as KanbanTask;
+        const prev = payload.old as KanbanTask;
+        if (task.stato === "Completato" && prev.stato !== "Completato" && "Notification" in window && Notification.permission === "granted") {
+          new Notification("✅ Task completata", { body: task.titolo, icon: "/assets/logo_login.png" });
+        }
+        loadWorkspace(uid);
+      })
       .subscribe();
     return () => { void getSupabase().removeChannel(channel); };
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1070,8 +1078,30 @@ function markdownToHtml(md: string): string {
 
 // ── PrintPreviewModal ─────────────────────────────────────────────────────────
 
-function PrintPreviewModal({ content, onClose }: { content: string; onClose: () => void }) {
+function PrintPreviewModal({ content, onClose, onToast }: { content: string; onClose: () => void; onToast?: (text: string, kind?: "error" | "success") => void }) {
   const html = markdownToHtml(content);
+  const savedRef = useRef(false);
+
+  useEffect(() => {
+    if (!onToast || savedRef.current) return;
+    savedRef.current = true;
+    const today = new Date();
+    const [year, month, day] = today.toISOString().split("T")[0].split("-");
+    const italianDate = `${day}/${month}/${year}`;
+    const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(/:/g, "");
+    const filePath = `press-kit/press-kit-${dateTimeStr}.html`;
+    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
+    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const supabase = getSupabase();
+    (async () => {
+      const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, blob, { contentType: "text/html", upsert: true });
+      if (storageErr) { onToast(`Errore upload vault: ${storageErr.message}`); return; }
+      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+      const { error: dbErr } = await supabase.from("vault_documenti").insert({ nome_file: `Press Kit ${italianDate}`, cartella: "Press", file_url: urlData.publicUrl });
+      if (dbErr) { onToast(`Errore vault: ${dbErr.message}`); return; }
+      onToast("Press kit salvato nel Vault → cartella Press.", "success");
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function downloadHtml() {
     const today = new Date();
@@ -1359,7 +1389,7 @@ function OverviewAIWidget({
       </div>
 
       {printContent !== null && (
-        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} onToast={onToast} />
       )}
     </div>
   );
@@ -1557,7 +1587,7 @@ function AIChatPanel({
       </div>
 
       {printContent !== null && (
-        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} onToast={onToast} />
       )}
     </div>
   );
@@ -1604,7 +1634,24 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [updatingProduct, setUpdatingProduct] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [inventoryView, setInventoryView] = useState<"list" | "analytics">("list");
   const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
+
+  const analyticsData = useMemo(() => {
+    const totalValue = products.reduce((sum, p) => {
+      const stock = (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
+      return sum + stock * Number(p.base_price_sell ?? 0);
+    }, 0);
+    const byProduct = products
+      .map((p) => ({ name: p.name, stock: (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0) }))
+      .sort((a, b) => b.stock - a.stock)
+      .slice(0, 8);
+    const maxStock = Math.max(...byProduct.map((p) => p.stock), 1);
+    const byCategory: Record<string, number> = {};
+    for (const p of products) { const cat = p.category ?? "Altro"; byCategory[cat] = (byCategory[cat] ?? 0) + 1; }
+    const lowStock = products.filter((p) => (p.product_variants ?? []).some((v) => Number(v.stock_quantity ?? 0) <= 3));
+    return { totalValue, byProduct, maxStock, byCategory, lowStock };
+  }, [products]);
 
   async function addProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1671,6 +1718,24 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
     <>
       <ModuleHeader title="Magazzino" text="Inventario merch, varianti e alert stock con lettura diretta dalle tabelle products e product_variants." icon={Warehouse} />
 
+      {/* Tab Lista / Analytics */}
+      <div className="mb-5 flex items-center gap-2">
+        <button
+          onClick={() => setInventoryView("list")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${inventoryView === "list" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <List size={14} />
+          Lista
+        </button>
+        <button
+          onClick={() => setInventoryView("analytics")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${inventoryView === "analytics" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <Sparkles size={14} />
+          Analytics
+        </button>
+      </div>
+
       {/* Modal modifica prodotto */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4" onClick={() => setEditingProduct(null)}>
@@ -1709,6 +1774,7 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
         </div>
       )}
 
+      {inventoryView === "list" && (
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         <div className="glass rounded-md p-5">
           <div className="mb-5 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
@@ -1829,6 +1895,81 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
           </form>
         </div>
       </div>
+      )}
+
+      {inventoryView === "analytics" && (
+        <div className="space-y-5">
+          {/* Valore totale */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="glass rounded-md border border-orange-400/25 bg-orange-500/12 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200/65">Valore totale stock</p>
+              <p className="mt-3 font-mono text-3xl font-black text-orange-200">{formatEuro(analyticsData.totalValue)}</p>
+            </div>
+            <div className="glass rounded-md border border-white/10 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">Prodotti totali</p>
+              <p className="mt-3 font-mono text-3xl font-black text-white">{products.length}</p>
+            </div>
+            <div className="glass rounded-md border border-red-400/25 bg-red-500/10 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200/65">Scorte basse (≤3)</p>
+              <p className="mt-3 font-mono text-3xl font-black text-red-300">{analyticsData.lowStock.length}</p>
+            </div>
+          </div>
+
+          {/* Stock per prodotto */}
+          <div className="glass rounded-md p-5">
+            <p className="mb-5 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Stock per prodotto</p>
+            <div className="space-y-3">
+              {analyticsData.byProduct.map((p) => (
+                <div key={p.name} className="flex items-center gap-3">
+                  <p className="w-36 shrink-0 truncate text-sm text-white/70">{p.name}</p>
+                  <div className="flex-1 rounded-full bg-white/[0.06]" style={{ height: 8 }}>
+                    <div
+                      className="rounded-full bg-orange-500 transition-all"
+                      style={{ height: 8, width: `${Math.round((p.stock / analyticsData.maxStock) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="w-8 shrink-0 text-right font-mono text-sm font-black text-white">{p.stock}</p>
+                </div>
+              ))}
+              {analyticsData.byProduct.length === 0 && <p className="text-sm text-white/35">Nessun prodotto.</p>}
+            </div>
+          </div>
+
+          {/* Distribuzione per categoria + Alert scorte basse */}
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="glass rounded-md p-5">
+              <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Per categoria</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(analyticsData.byCategory).map(([cat, count]) => {
+                  const pct = products.length > 0 ? Math.round((count / products.length) * 100) : 0;
+                  return (
+                    <div key={cat} className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                      <span className="text-sm font-bold text-white">{cat}</span>
+                      <span className="font-mono text-xs text-orange-300">{pct}%</span>
+                    </div>
+                  );
+                })}
+                {Object.keys(analyticsData.byCategory).length === 0 && <p className="text-sm text-white/35">Nessun dato.</p>}
+              </div>
+            </div>
+            <div className="glass rounded-md p-5">
+              <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Alert scorte basse</p>
+              <div className="space-y-2">
+                {analyticsData.lowStock.length === 0 && <p className="text-sm text-white/35">Nessun prodotto sotto soglia.</p>}
+                {analyticsData.lowStock.map((p) => {
+                  const stock = (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
+                  return (
+                    <div key={p.id} className="flex items-center justify-between rounded-md border border-red-400/20 bg-red-500/[0.06] px-3 py-2">
+                      <p className="text-sm text-white/80">{p.name}</p>
+                      <span className="font-mono text-sm font-black text-red-300">{stock} rimasti</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1840,6 +1981,14 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth()); // 0-indexed
   const [popoverEvent, setPopoverEvent] = useState<CalendarEvent | null>(null);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "denied"
+  );
+
+  function requestNotifPerm() {
+    if (!("Notification" in window)) return;
+    void Notification.requestPermission().then((p) => setNotifPerm(p));
+  }
 
   const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
   const GIORNI_HEADER = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
@@ -1961,7 +2110,7 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
       />
 
       {/* Toggle Mensile / Lista / Task Board */}
-      <div className="mb-5 flex items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setCalView("month")}
           className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${calView === "month" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
@@ -1983,6 +2132,14 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
           <ClipboardList size={14} />
           Task Board
         </button>
+        {calView === "kanban" && typeof window !== "undefined" && "Notification" in window && notifPerm !== "denied" && (
+          <button
+            onClick={notifPerm === "default" ? requestNotifPerm : undefined}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition ${notifPerm === "granted" ? "cursor-default bg-emerald-500/15 text-emerald-300" : "cursor-pointer bg-orange-500/15 text-orange-300 hover:bg-orange-500/25"}`}
+          >
+            🔔 {notifPerm === "granted" ? "Notifiche attive" : "Abilita notifiche"}
+          </button>
+        )}
       </div>
 
       {calView === "kanban" && (
@@ -2092,7 +2249,15 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
                     <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
                     <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
                     <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
-                    <div className="mt-4 flex justify-end">
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => downloadIcs(event)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
+                        title="Scarica ICS per Google / Apple Calendar"
+                      >
+                        <CalendarDays size={13} />
+                        ICS
+                      </button>
                       <button
                         onClick={() => deleteEvent(event.id)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
@@ -4282,4 +4447,34 @@ function formatDate(value: string) {
     timeStyle: "short",
     timeZone: "Europe/Rome",
   }).format(new Date(value));
+}
+
+function generateIcs(event: CalendarEvent): string {
+  const dt = new Date(event.data_evento);
+  function fmt(d: Date) { return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"; }
+  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//SUPERFLUIDO Bunker//IT",
+    "BEGIN:VEVENT",
+    `UID:${String(event.id)}@superfluido-bunker`,
+    `DTSTART:${fmt(dt)}`,
+    `DTEND:${fmt(dtEnd)}`,
+    `SUMMARY:${event.titolo ?? ""}`,
+    event.luogo ? `LOCATION:${event.luogo}` : "",
+    event.tipo_evento ? `DESCRIPTION:${event.tipo_evento}` : "",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+}
+
+function downloadIcs(event: CalendarEvent) {
+  const blob = new Blob([generateIcs(event)], { type: "text/calendar" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(event.titolo ?? "evento").replace(/\s+/g, "-")}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
