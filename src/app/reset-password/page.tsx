@@ -13,9 +13,20 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    const { data: sub } = getSupabase().auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") setReady(true);
+    const supabase = getSupabase();
+
+    // Subscribe first to catch the event if it fires after mount
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") { setReady(true); return; }
+      // INITIAL_SESSION fires immediately on subscribe if a session already exists
+      if ((event === "INITIAL_SESSION" || event === "SIGNED_IN") && session) setReady(true);
     });
+
+    // Fallback: detectSessionInUrl may have set the session before this listener registered
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setReady(true);
+    });
+
     return () => sub.subscription.unsubscribe();
   }, []);
 

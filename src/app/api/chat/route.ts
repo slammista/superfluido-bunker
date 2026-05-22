@@ -282,7 +282,7 @@ export async function POST(request: Request) {
           const payload: Record<string, unknown> = {
             model: provider.model,
             temperature: 0.6,
-            max_tokens: 1200,
+            max_tokens: 4096,
             messages: msgs,
           };
           if (withTools) { payload.tools = tools; payload.tool_choice = "auto"; }
@@ -305,38 +305,6 @@ export async function POST(request: Request) {
         } catch (e) {
           lastError = e instanceof Error ? e : new Error(String(e));
           break; // network error — try next provider
-        }
-      }
-    }
-    throw lastError;
-  }
-
-  // callAIStreamRaw: streaming fetch, same retry + fallback logic
-  async function callAIStreamRaw(msgs: AIMessage[]): Promise<Response> {
-    let lastError: Error = new Error("Nessun provider AI disponibile.");
-    for (const provider of providers) {
-      for (let attempt = 0; attempt <= 2; attempt++) {
-        try {
-          const payload = { model: provider.model, temperature: 0.6, max_tokens: 1200, messages: msgs, stream: true };
-          const res = await fetch(provider.endpoint, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${provider.key}`, "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          if (RETRYABLE.has(res.status) && attempt < 2) {
-            await sleep(RETRY_DELAYS[attempt]);
-            continue;
-          }
-          if (!res.ok) {
-            const err = await res.text();
-            lastError = new Error(`AI ${res.status}: ${err.slice(0, 200)}`);
-            break;
-          }
-          activeProvider = provider.endpoint.includes("groq") ? "Groq" : "Gemini";
-          return res;
-        } catch (e) {
-          lastError = e instanceof Error ? e : new Error(String(e));
-          break;
         }
       }
     }
@@ -438,56 +406,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── Normal text response — streaming ─────────────────────────────────────
-    const streamRes = await callAIStreamRaw(messages);
-    const encoder = new TextEncoder();
-    let sseBuffer = "";
-    let fullText = "";
-    const transformedStream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const reader = streamRes.body!.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split("\n");
-          sseBuffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6).trim();
-            if (data === "[DONE]") {
-              const printable = fullText.includes("[PRINTABLE]");
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "", provider: activeProvider })}\n\n`),
-              );
-              controller.close();
-              return;
-            }
-            try {
-              const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
-              const chunk = parsed.choices?.[0]?.delta?.content ?? "";
-              if (chunk) {
-                fullText += chunk;
-                const chunkToSend = chunk.replace("[PRINTABLE]", "");
-                if (chunkToSend) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "chunk", text: chunkToSend })}\n\n`));
-                }
-              }
-            } catch { /* non-JSON line */ }
-          }
-        }
-        // Fallback if [DONE] never arrives
-        const printable = fullText.includes("[PRINTABLE]");
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "done", printable, actionPerformed: false, actionMessage: "", provider: activeProvider })}\n\n`),
-        );
-        controller.close();
-      },
-    });
-    return new Response(transformedStream, {
-      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
-    });
+    // ── Normal text response — use first call's result directly (avoids a second API call)
+    const text = choice?.message?.content ?? "";
+    const printable = text.includes("[PRINTABLE]");
+    const cleanText = text.replace("[PRINTABLE]", "").trimEnd();
+    return new Response(
+      textToSSEStream(cleanText, { printable, actionPerformed: false, actionMessage: "", provider: activeProvider }),
+      { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" } },
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Errore sconosciuto";
     return NextResponse.json({ error: msg }, { status: 500 });
