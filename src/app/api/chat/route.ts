@@ -82,7 +82,23 @@ const ARTIST_ALIASES: Record<string, string> = {
 function resolveArtist(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const key = raw.toLowerCase().trim();
-  return ARTIST_ALIASES[key] ?? raw;
+
+  // Exact match (fast path)
+  if (ARTIST_ALIASES[key]) return ARTIST_ALIASES[key];
+
+  // Scan for known aliases with word-boundary check (handles "slam e none", "per slam")
+  const found: string[] = [];
+  for (const [alias, canonical] of Object.entries(ARTIST_ALIASES)) {
+    const idx = key.indexOf(alias);
+    if (idx === -1) continue;
+    const before = key[idx - 1];
+    const after = key[idx + alias.length];
+    const boundary =
+      (!before || /[\s,&()]/.test(before)) && (!after || /[\s,&()]/.test(after));
+    if (boundary && !found.includes(canonical)) found.push(canonical);
+  }
+
+  return found.length > 0 ? found.join(",") : raw;
 }
 
 // ─── LLM call with retry + provider fallback ──────────────────────────────────
@@ -263,64 +279,102 @@ async function handlePressKit(
   context: WorkspaceContext,
   docsContent: string,
 ): Promise<string> {
-  const artist = entities.artist ?? "SUPERFLUIDO";
+  const artistStr = entities.artist ?? "SUPERFLUIDO";
+  const artists = artistStr.split(",").map((a) => a.trim()).filter(Boolean);
   const recipient = entities.recipient ?? "generico";
   const year = new Date().getFullYear();
-
-  const profile = context.profili?.find(
-    (p) =>
-      p.nome_arte?.toLowerCase().includes(artist.toLowerCase()) ||
-      artist.toLowerCase().includes((p.nome_arte ?? "").toLowerCase()),
-  );
-
+  const events = (context.eventi ?? []).slice(0, 5);
   const discography = (context.discografia ?? [])
     .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0))
-    .slice(0, 15);
+    .slice(0, 12);
 
-  const events = (context.eventi ?? []).slice(0, 5);
-
-  const profileInfo = profile
-    ? `Nome d'arte: ${profile.nome_arte}\nRuolo/Strumento: ${profile.ruolo}\nBio: ${profile.bio}\nInstagram: ${profile.instagram}\nSpotify: ${profile.spotify}\nEmail: ${profile.email}`
-    : `Artista del collettivo SUPERFLUIDO. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021. Genere: hip-hop indipendente/underground.\nInstagram: @superfluido_official\nEmail: superfluido@booking.com`;
+  const getProfile = (artist: string) =>
+    context.profili?.find(
+      (p) =>
+        p.nome_arte?.toLowerCase().includes(artist.toLowerCase()) ||
+        artist.toLowerCase().includes((p.nome_arte ?? "").toLowerCase()),
+    ) ?? null;
 
   const sysPrompt = `Sei un copywriter professionista specializzato in musica hip-hop italiana indipendente.
 Scrivi press kit professionali, credibili e coinvolgenti in italiano corretto.
 Tono: autorevole, diretto, adatto al mondo musicale underground italiano.
 Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi generiche di riempimento.`;
 
-  const userPrompt = `Genera un press kit professionale seguendo ESATTAMENTE questo template (rispetta i titoli delle sezioni):
+  let userPrompt: string;
+  let maxTokens = 2000;
+
+  if (artists.length > 1) {
+    maxTokens = 3500;
+    const artistSections = artists.map((artist) => {
+      const profile = getProfile(artist);
+      const profileInfo = profile
+        ? `Ruolo: ${profile.ruolo ?? "—"} | Bio: ${profile.bio ?? "—"} | Instagram: ${profile.instagram ?? "—"} | Email: ${profile.email ?? "—"}`
+        : `Membro del collettivo SUPERFLUIDO (Roma, 2021). Hip-hop underground italiano.`;
+      const discoText = discography.length > 0
+        ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}${d.spotify ? ` · [Spotify](${d.spotify})` : ""}`).join("\n")
+        : "[Discografia in aggiornamento]";
+      return `## ${artist}
+
+### Biografia
+[150-250 parole. Profilo: ${profileInfo}]
+
+### Discografia
+${discoText}
+
+### Contatti
+- Email: ${profile?.email ?? "superfluido@booking.com"}
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}`;
+    }).join("\n\n---\n\n");
+
+    userPrompt = `Genera un press kit collettivo professionale per ${artists.join(" & ")} — artisti del collettivo SUPERFLUIDO. Struttura obbligatoria:
+
+# ${artists.join(" & ")} — Press Kit ${year}
+
+## Presentazione
+[80-120 parole di intro su questo duo all'interno di SUPERFLUIDO. Spiega il legame artistico e il valore della combinazione.]
+
+${artistSections}
+
+---
+Destinatario: **${recipient}** — adatta tono ed enfasi.${docsContent ? `\n\nDocumenti Vault:\n${docsContent}` : ""}
+Ultima riga OBBLIGATORIA: [PRINTABLE]`;
+  } else {
+    const artist = artists[0] ?? "SUPERFLUIDO";
+    const profile = getProfile(artist);
+    const profileInfo = profile
+      ? `Nome d'arte: ${profile.nome_arte}\nRuolo/Strumento: ${profile.ruolo}\nBio: ${profile.bio}\nInstagram: ${profile.instagram}\nSpotify: ${profile.spotify}\nEmail: ${profile.email}`
+      : `Artista del collettivo SUPERFLUIDO. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021.\nInstagram: @superfluido_official | Email: superfluido@booking.com`;
+
+    userPrompt = `Genera un press kit professionale seguendo ESATTAMENTE questo template:
 
 # ${artist} — Press Kit ${year}
 
 ## Biografia
-[Scrivi 350-500 parole. Usa questi dati profilo: ${profileInfo}. Espandi la narrativa artistica, racconta il percorso, lo stile, l'identità sonora. Niente elenchi puntati in questa sezione — solo testo fluido e coinvolgente.]
+[350-500 parole. Profilo: ${profileInfo}. Narrativa fluida, senza elenchi puntati.]
 
 ## Discografia
-${
-    discography.length > 0
+${discography.length > 0
       ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}${d.spotify ? ` · [Spotify](${d.spotify})` : ""}`).join("\n")
-      : "[Discografia in aggiornamento]"
-  }
+      : "[Discografia in aggiornamento]"}
 
 ## Live & Collaborazioni
-[${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi l'approccio live e le collaborazioni rilevanti basandoti sul profilo e sul contesto.]
+[${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi approccio live e collaborazioni.]
 
 ## Stile & Influenze
-[Analisi del sound, delle influenze e dell'identità artistica. Basati su: ${profile?.ruolo ?? "hip-hop underground, lirismo denso, produzione originale"}.${docsContent ? " Puoi usare le info dai documenti del Vault sotto se pertinenti." : ""}]
+[Sound e influenze. Basati su: ${profile?.ruolo ?? "hip-hop underground, lirismo denso"}.${docsContent ? " Usa info dai Documenti Vault se pertinenti." : ""}]
 
 ## Contatti & Link
 - Email booking: ${profile?.email ?? "superfluido@booking.com"}
 - Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}
 
 ---
-NOTA: destinatario del press kit è **${recipient}** — adatta tono ed enfasi di conseguenza.${
-    docsContent ? `\n\nDocumenti del Vault disponibili (usa le info reali che trovi qui):\n${docsContent}` : ""
+Destinatario: **${recipient}** — adatta tono ed enfasi.${docsContent ? `\n\nDocumenti Vault:\n${docsContent}` : ""}
+Ultima riga OBBLIGATORIA: [PRINTABLE]`;
   }
-Aggiungi esattamente [PRINTABLE] come ultima riga.`;
 
   return callLLM(
     [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
-    { maxTokens: 2000, temperature: 0.72 },
+    { maxTokens, temperature: 0.72 },
   );
 }
 
@@ -416,6 +470,21 @@ export async function POST(request: Request) {
         ...body.pendingIntent.entities,
         ...Object.fromEntries(Object.entries(fresh.entities).filter(([, v]) => v != null)),
       };
+
+      // Direct mapping for follow-up answers — more reliable than LLM on short isolated words
+      if (intentType === "press_kit") {
+        const msg = lastMessage.content.toLowerCase();
+        if (!entities.recipient) {
+          if (/media|riviste|giornalisti|blog/.test(msg))                       entities.recipient = "media";
+          else if (/booking|venue|promoter|agenzi/.test(msg))                   entities.recipient = "booking";
+          else if (/distribuz|label|aggregatori|playlist|digitali/.test(msg))   entities.recipient = "distribuzione";
+          else if (/generic|nessun/.test(msg))                                  entities.recipient = "generico";
+        }
+        if (!entities.artist) {
+          const resolved = resolveArtist(lastMessage.content.trim());
+          if (resolved && resolved !== lastMessage.content.trim()) entities.artist = resolved;
+        }
+      }
     } else {
       const classified = await classifyIntent(lastMessage.content);
       intentType = classified.type;

@@ -1328,7 +1328,9 @@ function OverviewAIWidget({
                     : "rounded-bl-sm bg-white/[0.06] text-white/85"
                 }`}
               >
-                {msg.content}
+                {msg.role === "assistant"
+                  ? <span dangerouslySetInnerHTML={{ __html: renderMsgMarkdown(msg.content) }} />
+                  : msg.content}
               </div>
               {msg.printable && (
                 <button
@@ -1532,7 +1534,9 @@ function AIChatPanel({
                   : "bg-white/[0.06] text-white/85"
               }`}
             >
-              {msg.content}
+              {msg.role === "assistant"
+                ? <span dangerouslySetInnerHTML={{ __html: renderMsgMarkdown(msg.content) }} />
+                : msg.content}
             </div>
             {msg.printable && (
               <button
@@ -1633,6 +1637,7 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
   const [updatingProduct, setUpdatingProduct] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [inventoryView, setInventoryView] = useState<"list" | "analytics">("list");
+  const addFormRef = useRef<HTMLDivElement>(null);
   const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
 
   const analyticsData = useMemo(() => {
@@ -1869,10 +1874,15 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
           </div>
         </div>
 
-        <div className="glass rounded-md">
+        <div ref={addFormRef} className="glass rounded-md">
           <button
             type="button"
-            onClick={() => setShowAddForm((v) => !v)}
+            onClick={() => {
+              setShowAddForm((v) => {
+                if (!v) setTimeout(() => addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+                return !v;
+              });
+            }}
             className="flex w-full items-center justify-between px-5 py-4 lg:hidden"
           >
             <span className="text-sm font-black text-white">+ Nuovo prodotto</span>
@@ -1886,8 +1896,8 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
             <p className="mt-1 hidden text-sm text-white/50 lg:block">Creazione rapida su Supabase per merch e supporti fisici.</p>
             <Input name="name" label="Nome" required />
             <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
-            <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
-            <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
+            <Input name="price" label="Prezzo vendita" type="text" inputMode="decimal" />
+            <Input name="stock" label="Stock iniziale" type="text" inputMode="numeric" defaultValue="0" />
             <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
             <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
           </form>
@@ -2944,7 +2954,7 @@ function Projects({
           <p className="text-sm text-white/40">Nessun progetto in lavorazione. Creane uno o sposta una release in "In Lavorazione" da Distrib.</p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
           {wipAlbums.map((album) => {
             const count = tracks.filter((t) => t.album_id === album.id).length;
             return (
@@ -2953,21 +2963,21 @@ function Projects({
                 onClick={() => setSelectedAlbum(album)}
                 className="glass group overflow-hidden rounded-md text-left transition hover:border-orange-400/30"
               >
-                <div className={`relative h-40 bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
+                <div className={`relative aspect-square bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
                   {album.cover_image_url ? (
                     <Image src={album.cover_image_url} alt={album.nome_album} fill className="object-cover" unoptimized />
                   ) : (
-                    <Music size={40} className="text-white/20" />
+                    <Music size={32} className="text-white/20" />
                   )}
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
-                    <span className="rounded-full bg-black/60 p-3">
-                      <Play size={20} className="text-white" fill="white" />
+                    <span className="rounded-full bg-black/60 p-2.5">
+                      <Play size={16} className="text-white" fill="white" />
                     </span>
                   </div>
                 </div>
-                <div className="p-4">
-                  <p className="font-black text-white">{album.nome_album}</p>
-                  <p className="mt-1 text-xs text-white/45">{count} {count === 1 ? "traccia" : "tracce"}</p>
+                <div className="p-3">
+                  <p className="truncate text-sm font-bold text-white">{album.nome_album}</p>
+                  <p className="mt-0.5 text-xs text-white/45">{count} {count === 1 ? "traccia" : "tracce"}</p>
                 </div>
               </button>
             );
@@ -3318,33 +3328,30 @@ function Distrib({
             {current && current.list.length === 0 ? (
               <p className="py-16 text-center text-sm text-white/30">Nessuna release in questa sezione.</p>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                 {(current ?? SECTIONS[0])?.list.map((album) => {
                   const cover = album.cover_image_url;
                   const isWip = current?.key === "wip";
                   return (
                     <article key={album.id} className="glass group overflow-hidden rounded-md">
-                      <div className="relative h-44 w-full bg-white/[0.04]">
+                      <div className="relative aspect-square w-full bg-white/[0.04]">
                         {cover ? (
                           <Image src={cover} alt={album.nome_album} fill className="object-cover" unoptimized />
                         ) : (
                           <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumGradient(album.id)}`}>
-                            <Music size={40} className="text-white/30" />
+                            <Music size={32} className="text-white/30" />
                           </div>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                        <div className="absolute bottom-3 left-3 right-3">
-                          <p className="font-black leading-tight text-white">{album.nome_album}</p>
-                          {album.release_date && (
-                            <p className="mt-0.5 text-xs text-white/60">
-                              {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "long", day: "numeric" })}
-                            </p>
-                          )}
-                        </div>
                       </div>
 
-                      <div className="p-4">
-                        <div className="flex flex-wrap gap-2">
+                      <div className="p-3">
+                        <p className="truncate text-sm font-bold leading-tight text-white">{album.nome_album}</p>
+                        {album.release_date && (
+                          <p className="mt-0.5 text-xs text-white/50 truncate">
+                            {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "short" })}
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {album.link_spotify && (
                             <a href={album.link_spotify} target="_blank" rel="noreferrer"
                               className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20">
@@ -4432,6 +4439,15 @@ function ActionButton({ icon: Icon, text, loading = false }: { icon: typeof Plus
   );
 }
 
+// ── Markdown renderer for AI chat bubbles ────────────────────
+function renderMsgMarkdown(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
 // ── Utility ──────────────────────────────────────────────────
 
 function formatEuro(value: number | null) {
@@ -4450,7 +4466,7 @@ function formatDate(value: string) {
 function openGoogleCalendar(event: CalendarEvent) {
   const dt = new Date(event.data_evento);
   const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
-  function fmt(d: Date) { return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"; }
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
   const params = new URLSearchParams({
     action: "TEMPLATE",
     text: event.titolo ?? "",
@@ -4458,5 +4474,12 @@ function openGoogleCalendar(event: CalendarEvent) {
     ...(event.luogo ? { location: event.luogo } : {}),
     ...(event.tipo_evento ? { details: event.tipo_evento } : {}),
   });
-  window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, "_blank");
+  const webUrl = `https://calendar.google.com/calendar/render?${params.toString()}`;
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    // Intent URL opens Google Calendar app directly on Android, falls back to browser
+    window.location.href = `intent://calendar.google.com/calendar/render?${params.toString()}#Intent;scheme=https;package=com.google.android.calendar;S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
+  } else {
+    window.open(webUrl, "_blank");
+  }
 }
