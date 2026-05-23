@@ -240,22 +240,33 @@ function buildQuestion(type: Intent, missing: string[], entities: Entities): str
 
 async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> {
   try {
-    const { data: files } = await supabase
-      .from("vault_documenti")
-      .select("nome_file, file_url")
-      .eq("cartella", "Documenti")
-      .limit(6) as { data: Array<{ nome_file: string; file_url: string | null }> | null };
+    const [{ data: files }, { data: liveFiles }] = await Promise.all([
+      supabase
+        .from("vault_documenti")
+        .select("nome_file, file_url")
+        .eq("cartella", "Documenti")
+        .limit(6) as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+      supabase
+        .from("vault_documenti")
+        .select("nome_file, file_url")
+        .ilike("nome_file", "%live%superfluido%")
+        .limit(2) as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+    ]);
 
-    if (!files?.length) return "";
+    const allFiles: Array<{ nome_file: string; file_url: string | null; tag?: string }> = [
+      ...(files ?? []).map((f) => ({ ...f })),
+      ...(liveFiles ?? []).filter((lf) => !files?.some((f) => f.file_url === lf.file_url)).map((f) => ({ ...f, tag: "[LIVE DOC]" })),
+    ];
+
+    if (!allFiles.length) return "";
 
     const contents: string[] = [];
-    for (const file of files.slice(0, 5)) {
+    for (const file of allFiles.slice(0, 6)) {
       if (!file.file_url) continue;
       try {
         const res = await fetch(file.file_url, { signal: AbortSignal.timeout(3500) });
         if (!res.ok) continue;
         const raw = await res.text();
-        // Strip HTML tags, normalize whitespace, cap at 5000 chars per file
         const text = raw
           .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
@@ -263,7 +274,7 @@ async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> 
           .replace(/\s+/g, " ")
           .trim()
           .slice(0, 5000);
-        if (text.length > 80) contents.push(`### ${file.nome_file}\n${text}`);
+        if (text.length > 80) contents.push(`${file.tag ? `${file.tag} ` : ""}### ${file.nome_file}\n${text}`);
       } catch { /* timeout or fetch error — skip this file */ }
     }
     return contents.join("\n\n---\n\n");
@@ -310,20 +321,21 @@ Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi gener
       const profileInfo = profile
         ? `Ruolo: ${profile.ruolo ?? "—"} | Bio: ${profile.bio ?? "—"} | Instagram: ${profile.instagram ?? "—"} | Email: ${profile.email ?? "—"}`
         : `Membro del collettivo SUPERFLUIDO (Roma, 2021). Hip-hop underground italiano.`;
-      const discoText = discography.length > 0
-        ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}${d.spotify ? ` · [Spotify](${d.spotify})` : ""}`).join("\n")
-        : "[Discografia in aggiornamento]";
+      const artistSpotifyLinks = discography.filter((d) => d.spotify).slice(0, 4);
       return `## ${artist}
 
 ### Biografia
 [150-250 parole. Profilo: ${profileInfo}]
 
 ### Discografia
-${discoText}
+[Includi SOLO i lavori dove **${artist}** è coinvolto. Lista da filtrare:
+${discography.length > 0
+        ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+        : "[Discografia in aggiornamento]"}]
 
-### Contatti
+### Contatti & Link
 - Email: ${profile?.email ?? "superfluido@booking.com"}
-- Instagram: ${profile?.instagram ?? "@superfluido_official"}`;
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}${artistSpotifyLinks.length > 0 ? `\n${artistSpotifyLinks.map((d) => `- ${d.nome}: ${d.spotify}`).join("\n")}` : ""}`;
     }).join("\n\n---\n\n");
 
     userPrompt = `Genera un press kit collettivo professionale per ${artists.join(" & ")} — artisti del collettivo SUPERFLUIDO. Struttura obbligatoria:
@@ -345,6 +357,17 @@ Ultima riga OBBLIGATORIA: [PRINTABLE]`;
       ? `Nome d'arte: ${profile.nome_arte}\nRuolo/Strumento: ${profile.ruolo}\nBio: ${profile.bio}\nInstagram: ${profile.instagram}\nSpotify: ${profile.spotify}\nEmail: ${profile.email}`
       : `Artista del collettivo SUPERFLUIDO. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021.\nInstagram: @superfluido_official | Email: superfluido@booking.com`;
 
+    const groupAlbums = (context.discografia ?? [])
+      .filter((d) => /album/i.test(d.tipo ?? ""))
+      .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0));
+    const groupOthers = (context.discografia ?? [])
+      .filter((d) => !/album/i.test(d.tipo ?? ""))
+      .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0));
+    const groupDisco = [...groupAlbums, ...groupOthers];
+
+    const spotifyLinks = discography.filter((d) => d.spotify).slice(0, 6);
+    const hasLiveDoc = docsContent.includes("[LIVE DOC]");
+
     userPrompt = `Genera un press kit professionale seguendo ESATTAMENTE questo template:
 
 # ${artist} — Press Kit ${year}
@@ -353,19 +376,25 @@ Ultima riga OBBLIGATORIA: [PRINTABLE]`;
 [350-500 parole. Profilo: ${profileInfo}. Narrativa fluida, senza elenchi puntati.]
 
 ## Discografia
+[Includi SOLO i lavori dove **${artist}** è artista principale o featured. Escludi release dove ${artist} non è coinvolto. Lista completa da filtrare:
 ${discography.length > 0
-      ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}${d.spotify ? ` · [Spotify](${d.spotify})` : ""}`).join("\n")
-      : "[Discografia in aggiornamento]"}
+      ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+      : "[Discografia in aggiornamento]"}]
 
 ## Live & Collaborazioni
-[${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi approccio live e collaborazioni.]
+[${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi l'approccio live di SUPERFLUIDO come collettivo e le collaborazioni di ${artist} all'interno del gruppo.${hasLiveDoc ? " Usa le informazioni dal documento live nel Vault." : ""}]
 
-## Stile & Influenze
-[Sound e influenze. Basati su: ${profile?.ruolo ?? "hip-hop underground, lirismo denso"}.${docsContent ? " Usa info dai Documenti Vault se pertinenti." : ""}]
+## SUPERFLUIDO — Il Collettivo
+[Bio del collettivo SUPERFLUIDO in 150-200 parole. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021. Hip-hop underground italiano.]
+
+### Discografia Completa SUPERFLUIDO
+${groupDisco.length > 0
+      ? groupDisco.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+      : "[In aggiornamento]"}
 
 ## Contatti & Link
 - Email booking: ${profile?.email ?? "superfluido@booking.com"}
-- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}${spotifyLinks.length > 0 ? `\n\n### Link Streaming\n${spotifyLinks.map((d) => `- ${d.nome}: ${d.spotify}`).join("\n")}` : ""}
 
 ---
 Destinatario: **${recipient}** — adatta tono ed enfasi.${docsContent ? `\n\nDocumenti Vault:\n${docsContent}` : ""}
