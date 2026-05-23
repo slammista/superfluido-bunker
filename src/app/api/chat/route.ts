@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 // These values are already committed to the repository in scripts/ — not a new exposure.
 // They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
@@ -222,7 +222,7 @@ function buildQuestion(type: Intent, missing: string[], entities: Entities): str
 // Fetches text content from files in the "Documenti" vault folder.
 // Used to give the AI real context from the collective's documents.
 
-async function fetchDocumentiContent(supabase: ReturnType<typeof createClient>): Promise<string> {
+async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> {
   try {
     const { data: files } = await supabase
       .from("vault_documenti")
