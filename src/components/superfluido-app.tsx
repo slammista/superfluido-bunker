@@ -53,6 +53,11 @@ type AppUser = {
   role: Role;
 };
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
 type AppState = {
   products: Product[];
   events: CalendarEvent[];
@@ -794,6 +799,31 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
     visible: { opacity: 1, y: 0, transition: { duration: 0.22 } },
   };
 
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isIOSInstallable, setIsIOSInstallable] = useState(false);
+
+  useEffect(() => {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as unknown as Record<string, unknown>).MSStream;
+    const standalone = (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    setIsIOSInstallable(ios && !standalone);
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  function handleInstall() {
+    if (installPrompt) {
+      installPrompt.prompt();
+      installPrompt.userChoice.then(() => setInstallPrompt(null));
+    } else if (isIOSInstallable) {
+      onToast('Su Safari: tocca Condividi → "Aggiungi alla schermata Home"', "success");
+    }
+  }
+
   return (
     <>
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
@@ -818,6 +848,12 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
               <FileAudio size={18} />
               Apri Studio Hub
             </button>
+            {(installPrompt || isIOSInstallable) && (
+              <button onClick={handleInstall} className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white transition hover:border-white/25">
+                <Download size={18} />
+                Installa App
+              </button>
+            )}
           </div>
         </div>
 
