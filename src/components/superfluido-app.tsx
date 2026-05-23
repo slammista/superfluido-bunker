@@ -1206,12 +1206,45 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function handleDownload() {
+    const today = new Date();
+    const [year, month, day] = today.toISOString().split("T")[0].split("-");
+    const italianDate = `${day}/${month}/${year}`;
+    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
+
+    // iOS WebKit (Safari/Brave/Chrome iOS) ignores window.print() — use Web Share API instead
+    const isIOS =
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
+      const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+      const fileName = `press-kit-${italianDate.replace(/\//g, "-")}.html`;
+      const file = new File([blob], fileName, { type: "text/html" });
+      if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ title: "SUPERFLUIDO — Media Press Kit", files: [file] });
+          return;
+        } catch (err) {
+          if ((err as Error)?.name === "AbortError") return; // user cancelled
+        }
+      }
+      // Fallback: open blob in current tab so user can print from browser share button
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return;
+    }
+
+    window.print();
+  }
+
   return (
     <div id="press-kit-print-root" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
       <div className="mx-auto max-w-2xl px-6 py-8 sm:px-8">
         <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5 print:hidden">
           <button
-            onClick={() => window.print()}
+            onClick={handleDownload}
             className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
           >
             <Download size={15} />
@@ -1223,7 +1256,7 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Tap Scarica PDF → Stampa → Salva come PDF</span>
+          <span className="text-xs text-gray-400">iOS: tap Scarica PDF → Condividi → Stampa → Salva come PDF</span>
         </div>
         {/* Branded preview */}
         <div style={{ borderTop: "5px solid #f97316", marginBottom: "0" }} />
