@@ -368,7 +368,7 @@ export function SuperfluidoApp() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <button className="flex items-center gap-3 text-left" onClick={() => setView("home")}>
             <span className="relative block h-10 w-10 overflow-hidden rounded-md border border-white/10 bg-white/5">
-              <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain p-1" />
+              <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain p-1 animate-[spin_12s_linear_infinite]" />
             </span>
             <span>
               <span className="block text-sm font-black tracking-[0.18em] text-white">SUPERFLUIDO</span>
