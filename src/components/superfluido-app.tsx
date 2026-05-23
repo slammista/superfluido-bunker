@@ -1103,20 +1103,15 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function downloadHtml() {
+  function openPdf() {
     const today = new Date();
     const [year, month, day] = today.toISOString().split("T")[0].split("-");
     const italianDate = `${day}/${month}/${year}`;
     const fullHtml = buildPressKitHtmlStyled(html, italianDate);
     const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `press-kit-superfluido-${today.toISOString().split("T")[0]}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   return (
@@ -1124,11 +1119,11 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
       <div className="mx-auto max-w-2xl px-6 py-8 sm:px-8">
         <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
           <button
-            onClick={downloadHtml}
+            onClick={openPdf}
             className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
           >
             <Download size={15} />
-            Scarica
+            Scarica PDF
           </button>
           <button
             onClick={onClose}
@@ -1136,7 +1131,7 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Apri il file scaricato → stampa → salva come PDF</span>
+          <span className="text-xs text-gray-400">Si apre la finestra di stampa → salva come PDF</span>
         </div>
         {/* Branded preview */}
         <div style={{ borderTop: "5px solid #f97316", marginBottom: "0" }} />
@@ -1775,8 +1770,8 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
       )}
 
       {inventoryView === "list" && (
-      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-        <div className="glass rounded-md p-5">
+      <div className="grid gap-5 min-w-0 lg:grid-cols-[1fr_360px]">
+        <div className="glass rounded-md p-5 min-w-0 overflow-hidden">
           <div className="mb-5 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
             <Search size={18} className="text-white/40" />
             <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -3434,7 +3429,7 @@ function buildPressKitHtmlStyled(htmlBody: string, italianDate: string): string 
     .footer{margin-top:56px;padding-top:16px;border-top:2px solid #f97316;font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.1em}
     @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:36px 48px}}
   `;
-  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>superfluido-bunker.vercel.app<br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div></body></html>`;
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div><script>window.onload=function(){window.print();}</script></body></html>`;
 }
 
 // FIX 5: PressKit con download .txt e salvataggio nel vault
