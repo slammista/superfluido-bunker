@@ -453,7 +453,7 @@ export function SuperfluidoApp() {
         onClick={() => setChatOpen((o) => !o)}
         whileHover={{ scale: 1.08 }}
         whileTap={{ scale: 0.94 }}
-        className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
+        className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : chatOpen ? "bottom-36 xl:bottom-6" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
         title="AI Assistant"
       >
         <Sparkles size={22} />
@@ -1159,41 +1159,35 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
   );
 }
 
+type PendingIntentClient = { type: string; entities: Record<string, string | null> } | null;
+
 async function sendToAI(
   messages: ChatMessage[],
   context: ReturnType<typeof buildAIContext>,
   userId: string,
   onChunk: (chunk: string) => void,
-): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; provider?: string }> {
+  pendingIntent?: PendingIntentClient,
+): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; pendingIntent?: PendingIntentClient }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context, userId }),
+    body: JSON.stringify({ messages, context, userId, pendingIntent }),
   });
   if (!res.ok) { const data = await res.json() as { error?: string }; throw new Error(data.error ?? "Errore AI"); }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let meta: { actionPerformed: boolean; actionMessage: string; printable: boolean; provider: string } =
-    { actionPerformed: false, actionMessage: "", printable: false, provider: "AI" };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const parsed = JSON.parse(line.slice(6)) as { type: string; text?: string; actionPerformed?: boolean; actionMessage?: string; printable?: boolean; provider?: string };
-        if (parsed.type === "chunk") onChunk(parsed.text ?? "");
-        else if (parsed.type === "done") meta = { actionPerformed: parsed.actionPerformed ?? false, actionMessage: parsed.actionMessage ?? "", printable: parsed.printable ?? false, provider: parsed.provider ?? "AI" };
-      } catch { /* ignore */ }
-    }
-  }
-  return meta;
+  const data = await res.json() as {
+    text?: string;
+    actionPerformed?: boolean;
+    actionMessage?: string;
+    printable?: boolean;
+    pendingIntent?: PendingIntentClient;
+  };
+  if (data.text) onChunk(data.text);
+  return {
+    actionPerformed: data.actionPerformed ?? false,
+    actionMessage: data.actionMessage,
+    printable: data.printable ?? false,
+    pendingIntent: data.pendingIntent ?? null,
+  };
 }
 
 // ── OverviewAIWidget (embedded ChatGPT-style) ────────────────────────────────
@@ -1214,6 +1208,7 @@ function OverviewAIWidget({
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("AI");
+  const [pendingIntent, setPendingIntent] = useState<PendingIntentClient>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1246,13 +1241,14 @@ function OverviewAIWidget({
             return updated;
           });
         },
+        pendingIntent,
       );
+      setPendingIntent(meta.pendingIntent ?? null);
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
-      if (meta.provider) setAiProvider(meta.provider);
       if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
@@ -1282,7 +1278,7 @@ function OverviewAIWidget({
         <p className="font-black text-white">AI Assistant</p>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(null); }}
             className="ml-2 text-[11px] text-white/30 transition hover:text-white/60"
           >
             Nuova chat
@@ -1419,6 +1415,7 @@ function AIChatPanel({
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("AI");
+  const [pendingIntent, setPendingIntent] = useState<PendingIntentClient>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1451,13 +1448,14 @@ function AIChatPanel({
             return updated;
           });
         },
+        pendingIntent,
       );
+      setPendingIntent(meta.pendingIntent ?? null);
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
-      if (meta.provider) setAiProvider(meta.provider);
       if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
@@ -1492,7 +1490,7 @@ function AIChatPanel({
         </span>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(null); }}
             className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] font-semibold text-white/40 transition hover:border-orange-500/40 hover:text-orange-300"
           >
             <Plus size={11} />
@@ -2251,12 +2249,12 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
                     <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
                     <div className="mt-4 flex items-center justify-end gap-2">
                       <button
-                        onClick={() => downloadIcs(event)}
+                        onClick={() => openGoogleCalendar(event)}
                         className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
-                        title="Scarica ICS per Google / Apple Calendar"
+                        title="Aggiungi a Google Calendar"
                       >
                         <CalendarDays size={13} />
-                        ICS
+                        + Google Cal
                       </button>
                       <button
                         onClick={() => deleteEvent(event.id)}
@@ -4449,32 +4447,16 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function generateIcs(event: CalendarEvent): string {
+function openGoogleCalendar(event: CalendarEvent) {
   const dt = new Date(event.data_evento);
-  function fmt(d: Date) { return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"; }
   const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
-  return [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//SUPERFLUIDO Bunker//IT",
-    "BEGIN:VEVENT",
-    `UID:${String(event.id)}@superfluido-bunker`,
-    `DTSTART:${fmt(dt)}`,
-    `DTEND:${fmt(dtEnd)}`,
-    `SUMMARY:${event.titolo ?? ""}`,
-    event.luogo ? `LOCATION:${event.luogo}` : "",
-    event.tipo_evento ? `DESCRIPTION:${event.tipo_evento}` : "",
-    "END:VEVENT",
-    "END:VCALENDAR",
-  ].filter(Boolean).join("\r\n");
-}
-
-function downloadIcs(event: CalendarEvent) {
-  const blob = new Blob([generateIcs(event)], { type: "text/calendar" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${(event.titolo ?? "evento").replace(/\s+/g, "-")}.ics`;
-  a.click();
-  URL.revokeObjectURL(url);
+  function fmt(d: Date) { return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"; }
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: event.titolo ?? "",
+    dates: `${fmt(dt)}/${fmt(dtEnd)}`,
+    ...(event.luogo ? { location: event.luogo } : {}),
+    ...(event.tipo_evento ? { details: event.tipo_evento } : {}),
+  });
+  window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, "_blank");
 }
