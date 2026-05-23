@@ -57,6 +57,34 @@ type WorkspaceContext = {
   }>;
 };
 
+// ─── Artist alias resolution ──────────────────────────────────────────────────
+// Maps common nicknames/abbreviations to canonical artist names.
+
+const ARTIST_ALIASES: Record<string, string> = {
+  "slam": "Slam aka Hysteriack",
+  "hysteriack": "Slam aka Hysteriack",
+  "slam aka hysteriack": "Slam aka Hysteriack",
+  "none": "NONe",
+  "gg": "gg.Proiettili",
+  "proiettili": "gg.Proiettili",
+  "gg proiettili": "gg.Proiettili",
+  "eric": "Eric Draven",
+  "draven": "Eric Draven",
+  "eric draven": "Eric Draven",
+  "leony": "Leony47",
+  "leony47": "Leony47",
+  "giord": "Giord",
+  "martire": "Martire",
+  "superfluido": "SUPERFLUIDO",
+  "collettivo": "SUPERFLUIDO",
+};
+
+function resolveArtist(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const key = raw.toLowerCase().trim();
+  return ARTIST_ALIASES[key] ?? raw;
+}
+
 // ─── LLM call with retry + provider fallback ──────────────────────────────────
 
 function sleep(ms: number) {
@@ -101,32 +129,49 @@ async function callLLM(
 // ─── Intent classification ────────────────────────────────────────────────────
 
 async function classifyIntent(message: string): Promise<{ type: Intent; entities: Entities }> {
-  const prompt = `Classifica questo messaggio in uno dei 5 intent e estrai le entità. Rispondi SOLO con JSON, nessun testo extra.
+  const prompt = `Classifica questo messaggio in uno dei 5 intent ed estrai le entità. Rispondi SOLO con JSON valido, nessun testo extra.
 
-Intent:
-- press_kit: press kit, bio artistica, scheda artista, presentazione artista
-- create_task: crea task, aggiungi to-do, kanban, ricordami di
-- create_event: aggiungi al calendario, crea evento, segna data, live, showcase, sessione studio
-- search_vault: dove sono i file, cerca nel vault, trovami un documento, contratto
-- general: tutto il resto (domande, info, stato del workspace)
+INTENT:
+- press_kit: press kit, bio artistica, scheda artista, presentazione artista, profilo per booking/media
+- create_task: crea task, aggiungi to-do, kanban, ricordami di, bisogna fare
+- create_event: aggiungi al calendario, crea evento, segna data, live, showcase, sessione studio, concerto, release party
+- search_vault: dove sono i file, cerca nel vault, trovami un documento, contratto, tech rider, rider
+- general: tutto il resto (domande, info, stato del workspace, riassunti, statistiche)
 
-Entità (null se assente):
-- artist: nome artista (per press_kit)
-- recipient: destinatario press kit (media/booking/venue/distribuzione)
-- taskTitle: titolo task (per create_task)
-- deadline: data scadenza ISO (per create_task)
-- eventTitle: titolo evento (per create_event)
-- eventDate: data evento ISO (per create_event)
-- eventVenue: luogo (per create_event)
-- eventType: live|studio|riunione|release|altro (per create_event)
-- searchQuery: query ricerca (per search_vault)
+ARTISTI DEL COLLETTIVO SUPERFLUIDO (riconosci sempre questi alias):
+- "Slam aka Hysteriack" ← slam, hysteriack
+- "NONe" ← none, None, NONE
+- "gg.Proiettili" ← gg, proiettili, gg proiettili
+- "Eric Draven" ← eric, draven
+- "Leony47" ← leony, leony47
+- "Giord" ← giord
+- "Martire" ← martire
+- "SUPERFLUIDO" ← superfluido, collettivo, il collettivo
+
+ENTITÀ (usa null se assente, NON inventare):
+- artist: nome canonico artista (usa i nomi canonici sopra, non gli alias)
+- recipient: destinatario press kit → uno tra: media | booking | distribuzione | generico
+- taskTitle: titolo task — ESTRAILO DIRETTAMENTE dal messaggio, anche se non è esplicitamente "titolo"
+- deadline: data scadenza ISO 8601 (per create_task)
+- eventTitle: titolo evento — ESTRAILO dal messaggio (es. "live al Circolo" → "Live al Circolo")
+- eventDate: data ISO 8601 — converti date italiane: "venerdì" = prossimo venerdì, "domani" = domani, "15 giugno" = ${new Date().getFullYear()}-06-15, "25/06" = ${new Date().getFullYear()}-06-25T20:00:00
+- eventVenue: luogo evento se menzionato
+- eventType: live | studio | riunione | release | altro
+- searchQuery: query di ricerca (per search_vault)
+
+REGOLE:
+1. Se il messaggio cita un artista (anche soprannome), estrai sempre "artist" col nome canonico
+2. Per create_task: estrai sempre taskTitle dal testo, anche se non c'è una parola chiave esplicita
+3. Per create_event: estrai eventTitle e eventDate anche da frasi naturali
+4. Per recipient: se il messaggio dice "per media", "per booking", ecc., estrailo
+5. Sii aggressivo nell'estrazione — non lasciare null se l'info è deducibile
 
 Messaggio: "${message.replace(/"/g, "'")}"
 
 JSON:{"type":"general","entities":{"artist":null,"recipient":null,"taskTitle":null,"deadline":null,"eventTitle":null,"eventDate":null,"eventVenue":null,"eventType":null,"searchQuery":null}}`;
 
   try {
-    const raw = await callLLM([{ role: "user", content: prompt }], { maxTokens: 250, temperature: 0.1 });
+    const raw = await callLLM([{ role: "user", content: prompt }], { maxTokens: 300, temperature: 0.1 });
     const cleaned = raw.replace(/```json\n?|\n?```/g, "").trim();
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
@@ -140,38 +185,84 @@ JSON:{"type":"general","entities":{"artist":null,"recipient":null,"taskTitle":nu
 // ─── Context checking ─────────────────────────────────────────────────────────
 
 function getMissingFields(type: Intent, entities: Entities): string[] {
+  // Only artist is truly required for press_kit (title can always be inferred from message)
   if (type === "press_kit" && !entities.artist) return ["artist"];
-  if (type === "create_event") {
-    const m: string[] = [];
-    if (!entities.eventTitle) m.push("eventTitle");
-    if (!entities.eventDate) m.push("eventDate");
-    return m;
-  }
+  // For events, only date is required — title falls back to lastMessage.content
+  if (type === "create_event" && !entities.eventDate) return ["eventDate"];
   return [];
 }
 
 function buildQuestion(type: Intent, missing: string[], entities: Entities): string {
   if (type === "press_kit") {
     if (missing.includes("artist")) {
-      return "Per quale artista vuoi il press kit?\n(es. Eric Draven, Martire, gg.Proiettili, NONe, Slam, Leony47, Giord, o SUPERFLUIDO come collettivo)";
+      return `Per quale artista vuoi il press kit?
+
+→ **Eric Draven** · **Martire** · **gg.Proiettili** (gg) · **NONe** (none) · **Slam aka Hysteriack** (slam) · **Leony47** (leony) · **Giord**
+→ oppure **SUPERFLUIDO** come collettivo`;
     }
     if (!entities.recipient) {
-      return `Perfetto! A chi è destinato il press kit per **${entities.artist}**?\n- Media / riviste musicali\n- Booking / venue\n- Distribuzione digitale / playlist\n- Uso generico`;
+      return `Press kit per **${entities.artist}** — a chi è destinato?
+
+→ **Media** (riviste, blog, giornalisti musicali)
+→ **Booking** (venue, promoter, agenzie)
+→ **Distribuzione** (label, aggregatori digitali, playlist curator)
+→ **Generico** (nessun destinatario specifico)`;
     }
   }
   if (type === "create_event") {
-    if (missing.includes("eventTitle") && missing.includes("eventDate")) {
-      return "Che titolo e data ha l'evento?";
+    if (missing.includes("eventDate")) {
+      const title = entities.eventTitle ? `"${entities.eventTitle}"` : "l'evento";
+      return `Quando si tiene ${title}? (es. "15 giugno", "25/06/2026 21:00", "venerdì prossimo")`;
     }
-    if (missing.includes("eventTitle")) return "Che titolo vuoi dare all'evento?";
-    if (missing.includes("eventDate")) return `Che data e ora ha "${entities.eventTitle}"? (es. 2026-06-15 21:00)`;
   }
   return "Puoi darmi qualche dettaglio in più?";
 }
 
+// ─── Vault document content fetcher ──────────────────────────────────────────
+// Fetches text content from files in the "Documenti" vault folder.
+// Used to give the AI real context from the collective's documents.
+
+async function fetchDocumentiContent(supabase: ReturnType<typeof createClient>): Promise<string> {
+  try {
+    const { data: files } = await supabase
+      .from("vault_documenti")
+      .select("nome_file, file_url")
+      .eq("cartella", "Documenti")
+      .limit(6) as { data: Array<{ nome_file: string; file_url: string | null }> | null };
+
+    if (!files?.length) return "";
+
+    const contents: string[] = [];
+    for (const file of files.slice(0, 5)) {
+      if (!file.file_url) continue;
+      try {
+        const res = await fetch(file.file_url, { signal: AbortSignal.timeout(3500) });
+        if (!res.ok) continue;
+        const raw = await res.text();
+        // Strip HTML tags, normalize whitespace, cap at 5000 chars per file
+        const text = raw
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 5000);
+        if (text.length > 80) contents.push(`### ${file.nome_file}\n${text}`);
+      } catch { /* timeout or fetch error — skip this file */ }
+    }
+    return contents.join("\n\n---\n\n");
+  } catch {
+    return "";
+  }
+}
+
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-async function handlePressKit(entities: Entities, context: WorkspaceContext): Promise<string> {
+async function handlePressKit(
+  entities: Entities,
+  context: WorkspaceContext,
+  docsContent: string,
+): Promise<string> {
   const artist = entities.artist ?? "SUPERFLUIDO";
   const recipient = entities.recipient ?? "generico";
   const year = new Date().getFullYear();
@@ -215,14 +306,16 @@ ${
 [${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi l'approccio live e le collaborazioni rilevanti basandoti sul profilo e sul contesto.]
 
 ## Stile & Influenze
-[Analisi del sound, delle influenze e dell'identità artistica. Basati su: ${profile?.ruolo ?? "hip-hop underground, lirismo denso, produzione originale"}.]
+[Analisi del sound, delle influenze e dell'identità artistica. Basati su: ${profile?.ruolo ?? "hip-hop underground, lirismo denso, produzione originale"}.${docsContent ? " Puoi usare le info dai documenti del Vault sotto se pertinenti." : ""}]
 
 ## Contatti & Link
 - Email booking: ${profile?.email ?? "superfluido@booking.com"}
 - Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}
 
 ---
-NOTA: destinatario del press kit è **${recipient}** — adatta tono ed enfasi di conseguenza.
+NOTA: destinatario del press kit è **${recipient}** — adatta tono ed enfasi di conseguenza.${
+    docsContent ? `\n\nDocumenti del Vault disponibili (usa le info reali che trovi qui):\n${docsContent}` : ""
+  }
 Aggiungi esattamente [PRINTABLE] come ultima riga.`;
 
   return callLLM(
@@ -246,15 +339,38 @@ async function handleGeneral(
   message: string,
   history: ChatMessage[],
   context: WorkspaceContext,
+  docsContent: string,
 ): Promise<string> {
+  const taskOpen = (context.tasks ?? []).filter((t) => t.stato !== "Done" && t.stato !== "Completato");
+  const taskDone = (context.tasks ?? []).filter((t) => t.stato === "Done" || t.stato === "Completato");
+
   const sysPrompt = `Sei l'assistente operativo di SUPERFLUIDO Bunker — sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO, fondato a Roma nel 2021.
-MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack | Produttori: Leony47, Giord.
-Social: Instagram @superfluido_official | Booking: superfluido@booking.com
 
-Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riempimento.
+COLLETTIVO:
+MC: Eric Draven (aka Eric), Martire, gg.Proiettili (aka gg), NONe (aka none), Slam aka Hysteriack (aka Slam)
+Produttori: Leony47 (aka Leony), Giord
+Genere: hip-hop underground italiano. Base: Roma. Attivi dal 2021.
+Instagram: @superfluido_official | Booking: superfluido@booking.com
 
-Contesto workspace attuale:
-${JSON.stringify(context, null, 2)}`;
+WORKSPACE ATTUALE:
+- Task aperti (${taskOpen.length}): ${taskOpen.map((t) => `"${t.titolo}" [${t.stato}]${t.scadenza ? ` scad. ${t.scadenza}` : ""}`).join(", ") || "nessuno"}
+- Task completati: ${taskDone.length}
+- Prossimi eventi (${(context.eventi ?? []).length}): ${(context.eventi ?? []).map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join(", ") || "nessuno"}
+- Album in lavorazione: ${(context.album_in_lavorazione ?? []).map((a) => a.nome).join(", ") || "nessuno"}
+- Discografia (uscite): ${(context.discografia ?? []).length} release
+- Profili artisti: ${(context.profili ?? []).map((p) => p.nome_arte).filter(Boolean).join(", ")}
+- File nel Vault: ${(context.vault ?? []).length} documenti${docsContent ? `
+
+DOCUMENTI VAULT (cartella Documenti):
+${docsContent}` : ""}
+
+ISTRUZIONI:
+- Rispondi SEMPRE in italiano. Tono diretto, concreto, senza frasi di riempimento.
+- Se chiedono un riassunto del workspace: elenca task aperti, eventi imminenti, album in lavorazione.
+- Se chiedono info su un documento del Vault: usa i DOCUMENTI VAULT sopra.
+- Se chiedono statistiche: calcola dai dati del workspace.
+- Se chiedono di un artista: usa i profili nel workspace.
+- Non inventare dati. Se un'info non è nel contesto, dillo chiaramente.`;
 
   const msgs: AIMessage[] = [
     { role: "system", content: sysPrompt },
@@ -306,7 +422,10 @@ export async function POST(request: Request) {
       entities = classified.entities;
     }
 
-    // ── Step 2: Check for missing required context ─────────────────────────────
+    // ── Step 2: Resolve artist aliases ────────────────────────────────────────
+    entities.artist = resolveArtist(entities.artist);
+
+    // ── Step 3: Check for missing required context ─────────────────────────────
     const missing = getMissingFields(intentType, entities);
     // For press_kit: also ask for recipient if artist is known but recipient is not
     const needsRecipient = intentType === "press_kit" && !!entities.artist && !entities.recipient;
@@ -321,10 +440,16 @@ export async function POST(request: Request) {
       });
     }
 
-    // ── Step 3: Execute handler ────────────────────────────────────────────────
+    // ── Step 4: Fetch vault docs for context-heavy intents ─────────────────────
+    let docsContent = "";
+    if (supabase && (intentType === "general" || intentType === "press_kit")) {
+      docsContent = await fetchDocumentiContent(supabase);
+    }
+
+    // ── Step 5: Execute handler ────────────────────────────────────────────────
     switch (intentType) {
       case "press_kit": {
-        const raw = await handlePressKit(entities, context);
+        const raw = await handlePressKit(entities, context, docsContent);
         const printable = raw.includes("[PRINTABLE]");
         const text = raw.replace(/\[PRINTABLE\]/g, "").trimEnd();
         return NextResponse.json({ text, actionPerformed: false, printable });
@@ -384,7 +509,7 @@ export async function POST(request: Request) {
       }
 
       default: {
-        const text = await handleGeneral(lastMessage.content, history, context);
+        const text = await handleGeneral(lastMessage.content, history, context, docsContent);
         return NextResponse.json({ text, actionPerformed: false, printable: false });
       }
     }
