@@ -213,7 +213,7 @@ function buildQuestion(type: Intent, missing: string[], entities: Entities): str
     if (missing.includes("artist")) {
       return `Per quale artista vuoi il press kit?
 
-→ **Eric Draven** · **Martire** · **gg.Proiettili** (gg) · **NONe** (none) · **Slam aka Hysteriack** (slam) · **Leony47** (leony) · **Giord**
+→ **Eric Draven** · **Martire** · **gg.Proiettili** · **NONe** · **Slam** · **Leony47** · **Giord**
 → oppure **SUPERFLUIDO** come collettivo`;
     }
     if (!entities.recipient) {
@@ -245,12 +245,12 @@ async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> 
         .from("vault_documenti")
         .select("nome_file, file_url")
         .eq("cartella", "Documenti")
-        .limit(6) as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+        .limit(6) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
       supabase
         .from("vault_documenti")
         .select("nome_file, file_url")
         .ilike("nome_file", "%live%superfluido%")
-        .limit(2) as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+        .limit(2) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
     ]);
 
     const allFiles: Array<{ nome_file: string; file_url: string | null; tag?: string }> = [

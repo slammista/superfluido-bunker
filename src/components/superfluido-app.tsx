@@ -1206,23 +1206,12 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function openPdf() {
-    const today = new Date();
-    const [year, month, day] = today.toISOString().split("T")[0].split("-");
-    const italianDate = `${day}/${month}/${year}`;
-    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
-    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  }
-
   return (
-    <div className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
+    <div id="press-kit-print-root" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
       <div className="mx-auto max-w-2xl px-6 py-8 sm:px-8">
-        <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
+        <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5 print:hidden">
           <button
-            onClick={openPdf}
+            onClick={() => window.print()}
             className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
           >
             <Download size={15} />
@@ -1234,7 +1223,7 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Apri il file scaricato → stampa → salva come PDF</span>
+          <span className="text-xs text-gray-400">Tap Scarica PDF → Stampa → Salva come PDF</span>
         </div>
         {/* Branded preview */}
         <div style={{ borderTop: "5px solid #f97316", marginBottom: "0" }} />
@@ -2363,6 +2352,14 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
                       >
                         <CalendarDays size={13} />
                         + Google Cal
+                      </button>
+                      <button
+                        onClick={() => downloadIcs(event)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
+                        title="Aggiungi a Apple Calendar / Calendario"
+                      >
+                        <CalendarDays size={13} />
+                        + Apple Cal
                       </button>
                       <button
                         onClick={() => deleteEvent(event.id)}
@@ -3537,7 +3534,7 @@ function buildPressKitHtmlStyled(htmlBody: string, italianDate: string): string 
     .footer{margin-top:56px;padding-top:16px;border-top:2px solid #f97316;font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.1em}
     @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:36px 48px}}
   `;
-  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div><script>window.onload=function(){window.print();}</script></body></html>`;
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div></body></html>`;
 }
 
 // FIX 5: PressKit con download .txt e salvataggio nel vault
@@ -4559,6 +4556,28 @@ function formatDate(value: string) {
     timeStyle: "short",
     timeZone: "Europe/Rome",
   }).format(new Date(value));
+}
+
+function downloadIcs(event: CalendarEvent) {
+  const dt = new Date(event.data_evento);
+  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const lines = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//SUPERFLUIDO Bunker//EN",
+    "BEGIN:VEVENT",
+    `DTSTART:${fmt(dt)}`, `DTEND:${fmt(dtEnd)}`,
+    `SUMMARY:${(event.titolo ?? "Evento").replace(/[\\;,]/g, (c) => "\\" + c)}`,
+    event.luogo ? `LOCATION:${event.luogo.replace(/[\\;,]/g, (c) => "\\" + c)}` : "",
+    `UID:${event.id}@superfluido-bunker`,
+    "END:VEVENT", "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+  const blob = new Blob([lines], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(event.titolo ?? "evento").replace(/\s+/g, "-")}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function openGoogleCalendar(event: CalendarEvent) {

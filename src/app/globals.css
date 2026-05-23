@@ -94,3 +94,8 @@ button {
 header.scrolled {
   box-shadow: 0 4px 40px rgba(0, 0, 0, 0.55);
 }
+
+@media print {
+  body > *:not(#press-kit-print-root) { display: none !important; }
+  #press-kit-print-root { position: fixed; inset: 0; background: white; overflow: auto; z-index: 9999; }
+}
