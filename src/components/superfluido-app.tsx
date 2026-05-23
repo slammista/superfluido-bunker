@@ -801,6 +801,41 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
 
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOSInstallable, setIsIOSInstallable] = useState(false);
+  const [installGuide, setInstallGuide] = useState<"safari" | "chrome" | "brave" | "other" | null>(null);
+
+  const IOS_GUIDES = {
+    safari: {
+      title: "Aggiungi alla schermata Home",
+      steps: [
+        "Tocca l'icona Condividi (□↑) nella barra in basso",
+        '"Aggiungi alla schermata Home"',
+        '"Aggiungi" in alto a destra',
+      ],
+    },
+    chrome: {
+      title: "Chrome su iOS non supporta l'installazione PWA",
+      steps: [
+        "Copia l'URL dalla barra degli indirizzi",
+        "Apri Safari e incolla l'URL",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+    brave: {
+      title: "Brave su iOS non supporta l'installazione PWA",
+      steps: [
+        "Copia l'URL dalla barra degli indirizzi",
+        "Apri Safari e incolla l'URL",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+    other: {
+      title: "Installa tramite Safari",
+      steps: [
+        "Apri questa pagina in Safari",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+  };
 
   useEffect(() => {
     const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as unknown as Record<string, unknown>).MSStream;
@@ -815,12 +850,23 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
+  function detectIOSBrowser(): "safari" | "chrome" | "brave" | "other" {
+    const ua = navigator.userAgent;
+    if (/CriOS/.test(ua)) return "chrome";
+    if (/FxiOS|OPiOS|mercury/.test(ua)) return "other";
+    if (/Brave/.test(ua)) return "brave";
+    if (/Safari/.test(ua)) return "safari";
+    return "other";
+  }
+
   function handleInstall() {
     if (installPrompt) {
       installPrompt.prompt();
       installPrompt.userChoice.then(() => setInstallPrompt(null));
-    } else if (isIOSInstallable) {
-      onToast('Su Safari: tocca Condividi → "Aggiungi alla schermata Home"', "success");
+      return;
+    }
+    if (isIOSInstallable) {
+      setInstallGuide(installGuide ? null : detectIOSBrowser());
     }
   }
 
@@ -855,6 +901,27 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
               </button>
             )}
           </div>
+          {installGuide && (() => {
+            const guide = IOS_GUIDES[installGuide];
+            return (
+              <div className="mt-4 rounded-md border border-white/12 bg-white/[0.04] p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm font-bold text-white">{guide.title}</p>
+                  <button onClick={() => setInstallGuide(null)} className="text-white/40 transition hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+                <ol className="space-y-2">
+                  {guide.steps.map((step, i) => (
+                    <li key={i} className="flex gap-2.5 text-sm text-white/70">
+                      <span className="shrink-0 font-mono text-orange-400">{i + 1}.</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="glass rounded-md p-6">
