@@ -294,7 +294,6 @@ async function handlePressKit(
   const artists = artistStr.split(",").map((a) => a.trim()).filter(Boolean);
   const recipient = entities.recipient ?? "generico";
   const year = new Date().getFullYear();
-  const events = (context.eventi ?? []).slice(0, 5);
   const discography = (context.discografia ?? [])
     .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0))
     .slice(0, 12);
@@ -309,7 +308,8 @@ async function handlePressKit(
   const sysPrompt = `Sei un copywriter professionista specializzato in musica hip-hop italiana indipendente.
 Scrivi press kit professionali, credibili e coinvolgenti in italiano corretto.
 Tono: autorevole, diretto, adatto al mondo musicale underground italiano.
-Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi generiche di riempimento.`;
+Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi generiche di riempimento.
+Le sezioni marcate {{VERBATIM}} devono essere riprodotte esattamente come scritte nel template, senza aggiungere testo introduttivo, descrittivo o conclusivo.`;
 
   let userPrompt: string;
   let maxTokens = 2000;
@@ -328,7 +328,7 @@ Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi gener
 [150-250 parole. Profilo: ${profileInfo}]
 
 ### Discografia
-[Includi SOLO i lavori dove **${artist}** è coinvolto. Lista da filtrare:
+[REGOLA: includi una traccia SOLO se il nome "${artist}" appare ESPLICITAMENTE nel testo del titolo come artista principale o nella sezione "feat." / "con". Se il nome non è visibile nel titolo, ESCLUDI la traccia — anche se è una release SUPERFLUIDO. Lista da filtrare:
 ${discography.length > 0
         ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
         : "[Discografia in aggiornamento]"}]
@@ -376,25 +376,26 @@ Ultima riga OBBLIGATORIA: [PRINTABLE]`;
 [350-500 parole. Profilo: ${profileInfo}. Narrativa fluida, senza elenchi puntati.]
 
 ## Discografia
-[Includi SOLO i lavori dove **${artist}** è artista principale o featured. Escludi release dove ${artist} non è coinvolto. Lista completa da filtrare:
+[REGOLA: includi una traccia SOLO se il nome "${artist}" (o una forma abbreviata riconoscibile, es. per "Slam aka Hysteriack" accetta anche "Slam" o "Hysteriack") appare ESPLICITAMENTE nel testo del titolo come artista principale oppure nella sezione "feat." o "con". Se il nome non è visibile nel titolo della traccia, ESCLUDI senza eccezioni — anche se è una release SUPERFLUIDO. Lista da filtrare:
 ${discography.length > 0
       ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
       : "[Discografia in aggiornamento]"}]
 
-## Live & Collaborazioni
-[${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi l'approccio live di SUPERFLUIDO come collettivo e le collaborazioni di ${artist} all'interno del gruppo.${hasLiveDoc ? " Usa le informazioni dal documento live nel Vault." : ""}]
+## Live
+[Descrivi l'attività live passata di SUPERFLUIDO come collettivo: concerti, showcase, festival già effettuati. NON menzionare eventi futuri, date di calendario o informazioni organizzative interne.${hasLiveDoc ? " Usa come base principale le informazioni del documento live nel Vault." : " Scrivi 2-4 frasi sull'approccio live e sull'energia dal vivo del collettivo."}]
 
 ## SUPERFLUIDO — Il Collettivo
-[Bio del collettivo SUPERFLUIDO in 150-200 parole. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021. Hip-hop underground italiano.]
+[Bio del collettivo SUPERFLUIDO. IMPORTANTE: se nei Documenti Vault è presente un testo di presentazione del collettivo (documento "PRESENTAZIONE" o simile), usalo come base principale — mantieni tono, parole chiave e informazioni originali del documento. Non inventare. Se non disponibile: 150-200 parole, Roma 2021, hip-hop underground, MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack, Produttori: Leony47, Giord.]
 
 ### Discografia Completa SUPERFLUIDO
 ${groupDisco.length > 0
       ? groupDisco.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
       : "[In aggiornamento]"}
 
-## Contatti & Link
-- Email booking: ${profile?.email ?? "superfluido@booking.com"}
-- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}${spotifyLinks.length > 0 ? `\n\n### Link Streaming\n${spotifyLinks.map((d) => `- ${d.nome}: ${d.spotify}`).join("\n")}` : ""}
+## Contatti
+{{VERBATIM}}
+- Email: ${profile?.email ?? "superfluido@booking.com"}
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}${spotifyLinks.length > 0 ? `\n${spotifyLinks.map((d) => `- Spotify ${d.nome}: ${d.spotify}`).join("\n")}` : ""}
 
 ---
 Destinatario: **${recipient}** — adatta tono ed enfasi.${docsContent ? `\n\nDocumenti Vault:\n${docsContent}` : ""}
