@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { fetchArtistAlbums, extractSpotifyId } from "@/lib/spotify";
 
 // These values are already committed to the repository in scripts/ — not a new exposure.
 // They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
@@ -285,6 +286,51 @@ async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> 
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
+type DiscoItem = { nome: string; anno: string; tipo: string };
+
+async function fetchArtistDisco(
+  artistName: string,
+  spotifyUrl?: string | null,
+): Promise<{ items: DiscoItem[]; source: "spotify" | "deezer" | "db" }> {
+  // 1. Spotify (via artist profile URL)
+  const artistId = spotifyUrl ? extractSpotifyId(spotifyUrl, "artist") : null;
+  if (artistId) {
+    try {
+      const data = await fetchArtistAlbums(artistId);
+      const items = (data.items ?? []).map((d: { name: string; release_date: string; album_type: string }) => ({
+        nome: d.name,
+        anno: d.release_date?.slice(0, 4) ?? "—",
+        tipo: d.album_type,
+      }));
+      if (items.length > 0) return { items, source: "spotify" };
+    } catch { /* fall through */ }
+  }
+  // 2. Deezer public API (no credentials needed)
+  try {
+    const searchRes = await fetch(
+      `https://api.deezer.com/search/artist?q=${encodeURIComponent(artistName)}&limit=1`,
+      { signal: AbortSignal.timeout(3000) },
+    );
+    const searchData = await searchRes.json() as { data?: { id: number }[] };
+    const deezerArtistId = searchData?.data?.[0]?.id;
+    if (deezerArtistId) {
+      const albumRes = await fetch(
+        `https://api.deezer.com/artist/${deezerArtistId}/albums?limit=50`,
+        { signal: AbortSignal.timeout(3000) },
+      );
+      const albumData = await albumRes.json() as { data?: { title: string; release_date: string; record_type: string }[] };
+      const items = (albumData?.data ?? []).map((d) => ({
+        nome: d.title,
+        anno: d.release_date?.slice(0, 4) ?? "—",
+        tipo: d.record_type,
+      }));
+      if (items.length > 0) return { items, source: "deezer" };
+    }
+  } catch { /* fall through */ }
+  // 3. Fallback: DB context
+  return { items: [], source: "db" };
+}
+
 async function handlePressKit(
   entities: Entities,
   context: WorkspaceContext,
@@ -309,6 +355,7 @@ async function handlePressKit(
 Scrivi press kit professionali, credibili e coinvolgenti in italiano corretto.
 Tono: autorevole, diretto, adatto al mondo musicale underground italiano.
 Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi generiche di riempimento.
+La sezione ## Biografia deve contenere SOLO testo narrativo (background, stile, visione artistica). NON inserire URL, email, handle social (@...) o titoli di release nella biografia — quelli vanno nelle rispettive sezioni dedicate.
 Le sezioni marcate {{VERBATIM}} devono essere riprodotte esattamente come scritte nel template, senza aggiungere testo introduttivo, descrittivo o conclusivo.`;
 
   let userPrompt: string;
@@ -316,27 +363,33 @@ Le sezioni marcate {{VERBATIM}} devono essere riprodotte esattamente come scritt
 
   if (artists.length > 1) {
     maxTokens = 3500;
-    const artistSections = artists.map((artist) => {
+    const artistSections = (await Promise.all(artists.map(async (artist) => {
       const profile = getProfile(artist);
       const profileInfo = profile
         ? `Ruolo: ${profile.ruolo ?? "—"} | Bio: ${profile.bio ?? "—"} | Instagram: ${profile.instagram ?? "—"} | Email: ${profile.email ?? "—"}`
         : `Membro del collettivo SUPERFLUIDO (Roma, 2021). Hip-hop underground italiano.`;
-      const artistSpotifyLinks = discography.filter((d) => d.spotify).slice(0, 4);
+      const { items: artistDisco, source: artistDiscoSrc } = await fetchArtistDisco(artist, profile?.spotify);
+      const useArtistStreaming = artistDisco.length > 0;
+      const artistDiscoItems = useArtistStreaming ? artistDisco : discography;
+      const artistDiscoNote = useArtistStreaming
+        ? `Discografia ufficiale da ${artistDiscoSrc === "spotify" ? "Spotify" : "Deezer"} (già filtrata — includila tutta):`
+        : `Lista DB da filtrare — includi SOLO tracce dove il nome "${artist}" appare nel titolo:`;
       return `## ${artist}
 
 ### Biografia
-[150-250 parole. Profilo: ${profileInfo}]
+[150-250 parole. Profilo: ${profileInfo}. Solo testo narrativo, no URL o titoli di release.]
 
 ### Discografia
-[REGOLA: includi una traccia SOLO se il nome "${artist}" appare ESPLICITAMENTE nel testo del titolo come artista principale o nella sezione "feat." / "con". Se il nome non è visibile nel titolo, ESCLUDI la traccia — anche se è una release SUPERFLUIDO. Lista da filtrare:
-${discography.length > 0
-        ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+[${artistDiscoNote}
+${artistDiscoItems.length > 0
+        ? artistDiscoItems.map((d) => `- **${d.nome}** (${d.anno}) · ${d.tipo}`).join("\n")
         : "[Discografia in aggiornamento]"}]
 
-### Contatti & Link
+### Contatti
+{{VERBATIM}}
 - Email: ${profile?.email ?? "superfluido@booking.com"}
-- Instagram: ${profile?.instagram ?? "@superfluido_official"}${artistSpotifyLinks.length > 0 ? `\n${artistSpotifyLinks.map((d) => `- ${d.nome}: ${d.spotify}`).join("\n")}` : ""}`;
-    }).join("\n\n---\n\n");
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}`;
+    }))).join("\n\n---\n\n");
 
     userPrompt = `Genera un press kit collettivo professionale per ${artists.join(" & ")} — artisti del collettivo SUPERFLUIDO. Struttura obbligatoria:
 
@@ -368,17 +421,24 @@ Ultima riga OBBLIGATORIA: [PRINTABLE]`;
     const spotifyLinks = discography.filter((d) => d.spotify).slice(0, 6);
     const hasLiveDoc = docsContent.includes("[LIVE DOC]");
 
+    const { items: streamingDisco, source: discoSrc } = await fetchArtistDisco(artist, profile?.spotify);
+    const useStreaming = streamingDisco.length > 0;
+    const discoItems = useStreaming ? streamingDisco : discography;
+    const discoNote = useStreaming
+      ? `Discografia ufficiale da ${discoSrc === "spotify" ? "Spotify" : "Deezer"} (già filtrata per questo artista — includila tutta ordinata per anno):`
+      : `Lista DB da filtrare — includi SOLO tracce dove "${artist}" appare nel titolo:`;
+
     userPrompt = `Genera un press kit professionale seguendo ESATTAMENTE questo template:
 
 # ${artist} — Press Kit ${year}
 
 ## Biografia
-[350-500 parole. Profilo: ${profileInfo}. Narrativa fluida, senza elenchi puntati.]
+[350-500 parole. Profilo: ${profileInfo}. Narrativa fluida, senza elenchi puntati. VINCOLO: la biografia NON deve citare URL, email, handle social o titoli di release. Solo testo narrativo su background, stile e visione artistica.]
 
 ## Discografia
-[REGOLA: includi una traccia SOLO se il nome "${artist}" (o una forma abbreviata riconoscibile, es. per "Slam aka Hysteriack" accetta anche "Slam" o "Hysteriack") appare ESPLICITAMENTE nel testo del titolo come artista principale oppure nella sezione "feat." o "con". Se il nome non è visibile nel titolo della traccia, ESCLUDI senza eccezioni — anche se è una release SUPERFLUIDO. Lista da filtrare:
-${discography.length > 0
-      ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+[${discoNote}
+${discoItems.length > 0
+      ? discoItems.map((d) => `- **${d.nome}** (${d.anno}) · ${d.tipo}`).join("\n")
       : "[Discografia in aggiornamento]"}]
 
 ## Live
