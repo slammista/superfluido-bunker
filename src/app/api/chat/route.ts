@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { fetchArtistAlbums, extractSpotifyId } from "@/lib/spotify";
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 
 // These values are already committed to the repository in scripts/ — not a new exposure.
 // They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
@@ -246,21 +246,17 @@ async function readLocalDocumenti(): Promise<string> {
   if (!fs.existsSync(docsDir)) return "";
   let filenames: string[];
   try {
-    filenames = fs.readdirSync(docsDir).filter((f) => f.toLowerCase().endsWith(".pdf"));
+    filenames = fs.readdirSync(docsDir).filter((f) => f.toLowerCase().endsWith(".txt"));
   } catch { return ""; }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
   const contents: string[] = [];
   for (const filename of filenames) {
     try {
-      const buffer = fs.readFileSync(path.join(docsDir, filename));
-      const parsed = await pdfParse(buffer);
-      const text = parsed.text.replace(/\s+/g, " ").trim().slice(0, 5000);
+      const text = fs.readFileSync(path.join(docsDir, filename), "utf8").replace(/\s+/g, " ").trim().slice(0, 5000);
       if (text.length > 80) {
         const tag = /tech.*rider|imbarchino|live/i.test(filename) ? "[LIVE DOC] " : "";
-        contents.push(`${tag}### ${filename.replace(/\.pdf$/i, "")}\n${text}`);
+        contents.push(`${tag}### ${filename.replace(/\.txt$/i, "")}\n${text}`);
       }
-    } catch { /* skip unreadable PDFs */ }
+    } catch { /* skip */ }
   }
   return contents.join("\n\n---\n\n");
 }
