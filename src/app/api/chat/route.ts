@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { fetchArtistAlbums, extractSpotifyId } from "@/lib/spotify";
+import fs from "fs";
+import path from "path";
 
 // These values are already committed to the repository in scripts/ — not a new exposure.
 // They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
@@ -239,49 +241,74 @@ function buildQuestion(type: Intent, missing: string[], entities: Entities): str
 // Fetches text content from files in the "Documenti" vault folder.
 // Used to give the AI real context from the collective's documents.
 
-async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> {
+async function readLocalDocumenti(): Promise<string> {
+  const docsDir = path.join(process.cwd(), "DOCUMENTI");
+  if (!fs.existsSync(docsDir)) return "";
+  let filenames: string[];
   try {
-    const [{ data: files }, { data: liveFiles }] = await Promise.all([
-      supabase
-        .from("vault_documenti")
-        .select("nome_file, file_url")
-        .eq("cartella", "Documenti")
-        .limit(6) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
-      supabase
-        .from("vault_documenti")
-        .select("nome_file, file_url")
-        .ilike("nome_file", "%live%superfluido%")
-        .limit(2) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
-    ]);
-
-    const allFiles: Array<{ nome_file: string; file_url: string | null; tag?: string }> = [
-      ...(files ?? []).map((f) => ({ ...f })),
-      ...(liveFiles ?? []).filter((lf) => !files?.some((f) => f.file_url === lf.file_url)).map((f) => ({ ...f, tag: "[LIVE DOC]" })),
-    ];
-
-    if (!allFiles.length) return "";
-
-    const contents: string[] = [];
-    for (const file of allFiles.slice(0, 6)) {
-      if (!file.file_url) continue;
-      try {
-        const res = await fetch(file.file_url, { signal: AbortSignal.timeout(3500) });
-        if (!res.ok) continue;
-        const raw = await res.text();
-        const text = raw
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 5000);
-        if (text.length > 80) contents.push(`${file.tag ? `${file.tag} ` : ""}### ${file.nome_file}\n${text}`);
-      } catch { /* timeout or fetch error — skip this file */ }
-    }
-    return contents.join("\n\n---\n\n");
-  } catch {
-    return "";
+    filenames = fs.readdirSync(docsDir).filter((f) => f.toLowerCase().endsWith(".pdf"));
+  } catch { return ""; }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
+  const contents: string[] = [];
+  for (const filename of filenames) {
+    try {
+      const buffer = fs.readFileSync(path.join(docsDir, filename));
+      const parsed = await pdfParse(buffer);
+      const text = parsed.text.replace(/\s+/g, " ").trim().slice(0, 5000);
+      if (text.length > 80) {
+        const tag = /tech.*rider|imbarchino|live/i.test(filename) ? "[LIVE DOC] " : "";
+        contents.push(`${tag}### ${filename.replace(/\.pdf$/i, "")}\n${text}`);
+      }
+    } catch { /* skip unreadable PDFs */ }
   }
+  return contents.join("\n\n---\n\n");
+}
+
+async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> {
+  // Local repo PDFs always available (committed to git, deployed to Vercel)
+  const [localContent, supabaseContent] = await Promise.all([
+    readLocalDocumenti(),
+    (async () => {
+      try {
+        const [{ data: files }, { data: liveFiles }] = await Promise.all([
+          supabase
+            .from("vault_documenti")
+            .select("nome_file, file_url")
+            .eq("cartella", "Documenti")
+            .limit(6) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+          supabase
+            .from("vault_documenti")
+            .select("nome_file, file_url")
+            .ilike("nome_file", "%live%superfluido%")
+            .limit(2) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+        ]);
+        const allFiles: Array<{ nome_file: string; file_url: string | null; tag?: string }> = [
+          ...(files ?? []).map((f) => ({ ...f })),
+          ...(liveFiles ?? []).filter((lf) => !files?.some((f) => f.file_url === lf.file_url)).map((f) => ({ ...f, tag: "[LIVE DOC]" })),
+        ];
+        const contents: string[] = [];
+        for (const file of allFiles.slice(0, 4)) {
+          if (!file.file_url) continue;
+          try {
+            const res = await fetch(file.file_url, { signal: AbortSignal.timeout(3500) });
+            if (!res.ok) continue;
+            const raw = await res.text();
+            const text = raw
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 3000);
+            if (text.length > 80) contents.push(`${file.tag ? `${file.tag} ` : ""}### ${file.nome_file}\n${text}`);
+          } catch { /* timeout or fetch error — skip */ }
+        }
+        return contents.join("\n\n---\n\n");
+      } catch { return ""; }
+    })(),
+  ]);
+  return [localContent, supabaseContent].filter(Boolean).join("\n\n---\n\n");
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -462,10 +489,11 @@ Destinatario: **${recipient}** — adatta tono ed enfasi.${docsContent ? `\n\nDo
 Ultima riga OBBLIGATORIA: [PRINTABLE]`;
   }
 
-  return callLLM(
+  const raw = await callLLM(
     [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
     { maxTokens, temperature: 0.72 },
   );
+  return raw.replace(/\{\{VERBATIM\}\}\n?/g, "");
 }
 
 function handleVault(query: string, context: WorkspaceContext): string {

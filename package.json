@@ -13,12 +13,14 @@
     "framer-motion": "^12.40.0",
     "lucide-react": "latest",
     "next": "latest",
+    "pdf-parse": "^1.1.1",
     "react": "latest",
     "react-dom": "latest"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "latest",
     "@types/node": "latest",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",
