@@ -14,6 +14,7 @@
     "lucide-react": "latest",
     "next": "latest",
     "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.18.0",
     "react": "latest",
     "react-dom": "latest"
   },
@@ -21,6 +22,7 @@
     "@tailwindcss/postcss": "latest",
     "@types/node": "latest",
     "@types/pdf-parse": "^1.1.5",
+    "@types/pdfkit": "^0.17.6",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",

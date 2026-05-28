@@ -1192,51 +1192,49 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
     const [year, month, day] = today.toISOString().split("T")[0].split("-");
     const italianDate = `${day}/${month}/${year}`;
     const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(/:/g, "");
-    const filePath = `press-kit/press-kit-${dateTimeStr}.html`;
-    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
-    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const filePath = `press-kit/press-kit-${dateTimeStr}.pdf`;
     const supabase = getSupabase();
     (async () => {
-      const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, blob, { contentType: "text/html", upsert: true });
-      if (storageErr) { onToast(`Errore upload vault: ${storageErr.message}`); return; }
-      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
-      const { error: dbErr } = await supabase.from("vault_documenti").insert({ nome_file: `Press Kit ${italianDate}`, cartella: "Press", file_url: urlData.publicUrl });
-      if (dbErr) { onToast(`Errore vault: ${dbErr.message}`); return; }
-      onToast("Press kit salvato nel Vault → cartella Press.", "success");
+      try {
+        const res = await fetch("/api/pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, title: "MEDIA PRESS KIT" }),
+        });
+        if (!res.ok) throw new Error("pdf-gen-failed");
+        const pdfBlob = await res.blob();
+        const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, pdfBlob, { contentType: "application/pdf", upsert: true });
+        if (storageErr) { onToast(`Errore upload vault: ${storageErr.message}`); return; }
+        const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+        const { error: dbErr } = await supabase.from("vault_documenti").insert({ nome_file: `Press Kit ${italianDate}`, cartella: "Press", file_url: urlData.publicUrl });
+        if (dbErr) { onToast(`Errore vault: ${dbErr.message}`); return; }
+        onToast("Press kit salvato nel Vault → cartella Press.", "success");
+      } catch {
+        onToast("Errore generazione PDF vault.", "error");
+      }
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleDownload() {
-    const today = new Date();
-    const [year, month, day] = today.toISOString().split("T")[0].split("-");
-    const italianDate = `${day}/${month}/${year}`;
-    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
-
-    // iOS WebKit (Safari/Brave/Chrome iOS) ignores window.print() — use Web Share API instead
-    const isIOS =
-      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
-      (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1);
-
-    if (isIOS) {
-      const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
-      const fileName = `press-kit-${italianDate.replace(/\//g, "-")}.html`;
-      const file = new File([blob], fileName, { type: "text/html" });
-      if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
-        try {
-          await navigator.share({ title: "SUPERFLUIDO — Media Press Kit", files: [file] });
-          return;
-        } catch (err) {
-          if ((err as Error)?.name === "AbortError") return; // user cancelled
-        }
-      }
-      // Fallback: open blob in current tab so user can print from browser share button
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, title: "MEDIA PRESS KIT" }),
+      });
+      if (!res.ok) throw new Error("pdf-gen-failed");
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      return;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `press-kit-superfluido-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      window.print();
     }
-
-    window.print();
   }
 
   return (

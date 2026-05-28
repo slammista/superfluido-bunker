@@ -433,13 +433,14 @@ Ultima riga OBBLIGATORIA: [PRINTABLE]`;
       ? `Nome d'arte: ${profile.nome_arte}\nRuolo/Strumento: ${profile.ruolo}\nBio: ${profile.bio}\nInstagram: ${profile.instagram}\nSpotify: ${profile.spotify}\nEmail: ${profile.email}`
       : `Artista del collettivo SUPERFLUIDO. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021.\nInstagram: @superfluido_official | Email: superfluido@booking.com`;
 
-    const groupAlbums = (context.discografia ?? [])
-      .filter((d) => /album/i.test(d.tipo ?? ""))
-      .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0));
-    const groupOthers = (context.discografia ?? [])
-      .filter((d) => !/album/i.test(d.tipo ?? ""))
-      .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0));
-    const groupDisco = [...groupAlbums, ...groupOthers];
+    // Detect singles by tipo field OR "- Single" suffix in name (DB defaults tipo to "album" for everything)
+    const isSingle = (d: { nome: string; tipo: string | null | undefined }) =>
+      /\bsingle\b/i.test(d.tipo ?? "") || / - single\s*$/i.test(d.nome ?? "");
+    const byAnno = (a: { anno?: string | null }, b: { anno?: string | null }) =>
+      Number(b.anno ?? 0) - Number(a.anno ?? 0);
+    const groupProjects = (context.discografia ?? []).filter((d) => !isSingle(d)).sort(byAnno);
+    const groupSingles = (context.discografia ?? []).filter((d) => isSingle(d)).sort(byAnno);
+    const groupDisco = [...groupProjects, ...groupSingles];
 
     const spotifyLinks = discography.filter((d) => d.spotify).slice(0, 6);
     const hasLiveDoc = docsContent.includes("[LIVE DOC]");
@@ -471,9 +472,9 @@ ${discoItems.length > 0
 [Bio del collettivo SUPERFLUIDO. IMPORTANTE: se nei Documenti Vault è presente un testo di presentazione del collettivo (documento "PRESENTAZIONE" o simile), usalo come base principale — mantieni tono, parole chiave e informazioni originali del documento. Non inventare. Se non disponibile: 150-200 parole, Roma 2021, hip-hop underground, MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack, Produttori: Leony47, Giord.]
 
 ### Discografia Completa SUPERFLUIDO
-${groupDisco.length > 0
-      ? groupDisco.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
-      : "[In aggiornamento]"}
+${groupProjects.length > 0
+      ? groupProjects.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+      : "[Progetti in aggiornamento]"}${groupSingles.length > 0 ? `\n\n**Singoli:**\n${groupSingles.slice(0, 10).map((d) => `- **${d.nome}** (${d.anno ?? "—"})`).join("\n")}` : ""}
 
 ## Contatti
 {{VERBATIM}}
