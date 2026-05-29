@@ -472,9 +472,10 @@ ${discoItems.length > 0
 [Bio del collettivo SUPERFLUIDO. IMPORTANTE: se nei Documenti Vault è presente un testo di presentazione del collettivo (documento "PRESENTAZIONE" o simile), usalo come base principale — mantieni tono, parole chiave e informazioni originali del documento. Non inventare. Se non disponibile: 150-200 parole, Roma 2021, hip-hop underground, MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack, Produttori: Leony47, Giord.]
 
 ### Discografia Completa SUPERFLUIDO
+[USA il documento "PRESENTAZIONE Superfluido" nei Documenti Vault per la lista completa. Riporta TUTTI i progetti (LP, EP, album) ordinati dal più recente al più vecchio. ESCLUDI completamente i singoli. Se il documento non è disponibile, usa la lista DB qui sotto — stessa regola: solo progetti, no singoli, ordine cronologico inverso:
 ${groupProjects.length > 0
-      ? groupProjects.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
-      : "[Progetti in aggiornamento]"}${groupSingles.length > 0 ? `\n\n**Singoli:**\n${groupSingles.slice(0, 10).map((d) => `- **${d.nome}** (${d.anno ?? "—"})`).join("\n")}` : ""}
+        ? groupProjects.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+        : "[Progetti in aggiornamento]"}]
 
 ## Contatti
 {{VERBATIM}}
