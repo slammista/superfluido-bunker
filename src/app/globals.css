@@ -18,6 +18,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 18% 12%, rgba(255, 107, 53, 0.18), transparent 28rem),
     radial-gradient(circle at 88% 4%, rgba(112, 196, 255, 0.12), transparent 22rem),
@@ -78,4 +79,23 @@ button {
 
 .metric-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+@keyframes wavebar {
+  0%, 100% { transform: scaleY(0.4); }
+  50%       { transform: scaleY(1); }
+}
+
+.wave-bar {
+  animation: wavebar 0.8s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+header.scrolled {
+  box-shadow: 0 4px 40px rgba(0, 0, 0, 0.55);
+}
+
+@media print {
+  body > *:not(#press-kit-print-root) { display: none !important; }
+  #press-kit-print-root { position: fixed; inset: 0; background: white; overflow: auto; z-index: 9999; }
 }

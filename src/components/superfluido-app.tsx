@@ -53,6 +53,11 @@ type AppUser = {
   role: Role;
 };
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
 type AppState = {
   products: Product[];
   events: CalendarEvent[];
@@ -368,7 +373,7 @@ export function SuperfluidoApp() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <button className="flex items-center gap-3 text-left" onClick={() => setView("home")}>
             <span className="relative block h-10 w-10 overflow-hidden rounded-md border border-white/10 bg-white/5">
-              <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain p-1" />
+              <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain p-1 animate-[spin_12s_linear_infinite]" />
             </span>
             <span>
               <span className="block text-sm font-black tracking-[0.18em] text-white">SUPERFLUIDO</span>
@@ -453,7 +458,7 @@ export function SuperfluidoApp() {
         onClick={() => setChatOpen((o) => !o)}
         whileHover={{ scale: 1.08 }}
         whileTap={{ scale: 0.94 }}
-        className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
+        className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : chatOpen ? "bottom-36 xl:bottom-6" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
         title="AI Assistant"
       >
         <Sparkles size={22} />
@@ -794,6 +799,77 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
     visible: { opacity: 1, y: 0, transition: { duration: 0.22 } },
   };
 
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isIOSInstallable, setIsIOSInstallable] = useState(false);
+  const [installGuide, setInstallGuide] = useState<"safari" | "chrome" | "brave" | "other" | null>(null);
+
+  const IOS_GUIDES = {
+    safari: {
+      title: "Aggiungi alla schermata Home",
+      steps: [
+        "Tocca l'icona Condividi (□↑) nella barra in basso",
+        '"Aggiungi alla schermata Home"',
+        '"Aggiungi" in alto a destra',
+      ],
+    },
+    chrome: {
+      title: "Chrome su iOS non supporta l'installazione PWA",
+      steps: [
+        "Copia l'URL dalla barra degli indirizzi",
+        "Apri Safari e incolla l'URL",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+    brave: {
+      title: "Brave su iOS non supporta l'installazione PWA",
+      steps: [
+        "Copia l'URL dalla barra degli indirizzi",
+        "Apri Safari e incolla l'URL",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+    other: {
+      title: "Installa tramite Safari",
+      steps: [
+        "Apri questa pagina in Safari",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+  };
+
+  useEffect(() => {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as unknown as Record<string, unknown>).MSStream;
+    const standalone = (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    setIsIOSInstallable(ios && !standalone);
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  function detectIOSBrowser(): "safari" | "chrome" | "brave" | "other" {
+    const ua = navigator.userAgent;
+    if (/CriOS/.test(ua)) return "chrome";
+    if (/FxiOS|OPiOS|mercury/.test(ua)) return "other";
+    if (/Brave/.test(ua)) return "brave";
+    if (/Safari/.test(ua)) return "safari";
+    return "other";
+  }
+
+  function handleInstall() {
+    if (installPrompt) {
+      installPrompt.prompt();
+      installPrompt.userChoice.then(() => setInstallPrompt(null));
+      return;
+    }
+    if (isIOSInstallable) {
+      setInstallGuide(installGuide ? null : detectIOSBrowser());
+    }
+  }
+
   return (
     <>
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
@@ -818,7 +894,34 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
               <FileAudio size={18} />
               Apri Studio Hub
             </button>
+            {(installPrompt || isIOSInstallable) && (
+              <button onClick={handleInstall} className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white transition hover:border-white/25">
+                <Download size={18} />
+                Installa App
+              </button>
+            )}
           </div>
+          {installGuide && (() => {
+            const guide = IOS_GUIDES[installGuide];
+            return (
+              <div className="mt-4 rounded-md border border-white/12 bg-white/[0.04] p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm font-bold text-white">{guide.title}</p>
+                  <button onClick={() => setInstallGuide(null)} className="text-white/40 transition hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+                <ol className="space-y-2">
+                  {guide.steps.map((step, i) => (
+                    <li key={i} className="flex gap-2.5 text-sm text-white/70">
+                      <span className="shrink-0 font-mono text-orange-400">{i + 1}.</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="glass rounded-md p-6">
@@ -1089,37 +1192,57 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
     const [year, month, day] = today.toISOString().split("T")[0].split("-");
     const italianDate = `${day}/${month}/${year}`;
     const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(/:/g, "");
-    const filePath = `press-kit/press-kit-${dateTimeStr}.html`;
-    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
-    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+    const filePath = `press-kit/press-kit-${dateTimeStr}.pdf`;
     const supabase = getSupabase();
     (async () => {
-      const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, blob, { contentType: "text/html", upsert: true });
-      if (storageErr) { onToast(`Errore upload vault: ${storageErr.message}`); return; }
-      const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
-      const { error: dbErr } = await supabase.from("vault_documenti").insert({ nome_file: `Press Kit ${italianDate}`, cartella: "Press", file_url: urlData.publicUrl });
-      if (dbErr) { onToast(`Errore vault: ${dbErr.message}`); return; }
-      onToast("Press kit salvato nel Vault → cartella Press.", "success");
+      try {
+        const res = await fetch("/api/pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, title: "MEDIA PRESS KIT" }),
+        });
+        if (!res.ok) throw new Error("pdf-gen-failed");
+        const pdfBlob = await res.blob();
+        const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, pdfBlob, { contentType: "application/pdf", upsert: true });
+        if (storageErr) { onToast(`Errore upload vault: ${storageErr.message}`); return; }
+        const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+        const { error: dbErr } = await supabase.from("vault_documenti").insert({ nome_file: `Press Kit ${italianDate}`, cartella: "Press", file_url: urlData.publicUrl });
+        if (dbErr) { onToast(`Errore vault: ${dbErr.message}`); return; }
+        onToast("Press kit salvato nel Vault → cartella Press.", "success");
+      } catch {
+        onToast("Errore generazione PDF vault.", "error");
+      }
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function openPdf() {
-    const today = new Date();
-    const [year, month, day] = today.toISOString().split("T")[0].split("-");
-    const italianDate = `${day}/${month}/${year}`;
-    const fullHtml = buildPressKitHtmlStyled(html, italianDate);
-    const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  async function handleDownload() {
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, title: "MEDIA PRESS KIT" }),
+      });
+      if (!res.ok) throw new Error("pdf-gen-failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `press-kit-superfluido-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      window.print();
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
+    <div id="press-kit-print-root" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
       <div className="mx-auto max-w-2xl px-6 py-8 sm:px-8">
-        <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
+        <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5 print:hidden">
           <button
-            onClick={openPdf}
+            onClick={handleDownload}
             className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
           >
             <Download size={15} />
@@ -1131,7 +1254,7 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Si apre la finestra di stampa → salva come PDF</span>
+          <span className="text-xs text-gray-400">iOS: tap Scarica PDF → Condividi → Stampa → Salva come PDF</span>
         </div>
         {/* Branded preview */}
         <div style={{ borderTop: "5px solid #f97316", marginBottom: "0" }} />
@@ -1154,41 +1277,35 @@ function PrintPreviewModal({ content, onClose, onToast }: { content: string; onC
   );
 }
 
+type PendingIntentClient = { type: string; entities: Record<string, string | null> } | null;
+
 async function sendToAI(
   messages: ChatMessage[],
   context: ReturnType<typeof buildAIContext>,
   userId: string,
   onChunk: (chunk: string) => void,
-): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; provider?: string }> {
+  pendingIntent?: PendingIntentClient,
+): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; pendingIntent?: PendingIntentClient }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context, userId }),
+    body: JSON.stringify({ messages, context, userId, pendingIntent }),
   });
   if (!res.ok) { const data = await res.json() as { error?: string }; throw new Error(data.error ?? "Errore AI"); }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let meta: { actionPerformed: boolean; actionMessage: string; printable: boolean; provider: string } =
-    { actionPerformed: false, actionMessage: "", printable: false, provider: "AI" };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const parsed = JSON.parse(line.slice(6)) as { type: string; text?: string; actionPerformed?: boolean; actionMessage?: string; printable?: boolean; provider?: string };
-        if (parsed.type === "chunk") onChunk(parsed.text ?? "");
-        else if (parsed.type === "done") meta = { actionPerformed: parsed.actionPerformed ?? false, actionMessage: parsed.actionMessage ?? "", printable: parsed.printable ?? false, provider: parsed.provider ?? "AI" };
-      } catch { /* ignore */ }
-    }
-  }
-  return meta;
+  const data = await res.json() as {
+    text?: string;
+    actionPerformed?: boolean;
+    actionMessage?: string;
+    printable?: boolean;
+    pendingIntent?: PendingIntentClient;
+  };
+  if (data.text) onChunk(data.text);
+  return {
+    actionPerformed: data.actionPerformed ?? false,
+    actionMessage: data.actionMessage,
+    printable: data.printable ?? false,
+    pendingIntent: data.pendingIntent ?? null,
+  };
 }
 
 // ── OverviewAIWidget (embedded ChatGPT-style) ────────────────────────────────
@@ -1209,6 +1326,7 @@ function OverviewAIWidget({
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("AI");
+  const [pendingIntent, setPendingIntent] = useState<PendingIntentClient>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1241,13 +1359,14 @@ function OverviewAIWidget({
             return updated;
           });
         },
+        pendingIntent,
       );
+      setPendingIntent(meta.pendingIntent ?? null);
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
-      if (meta.provider) setAiProvider(meta.provider);
       if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
@@ -1277,7 +1396,7 @@ function OverviewAIWidget({
         <p className="font-black text-white">AI Assistant</p>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(null); }}
             className="ml-2 text-[11px] text-white/30 transition hover:text-white/60"
           >
             Nuova chat
@@ -1327,7 +1446,9 @@ function OverviewAIWidget({
                     : "rounded-bl-sm bg-white/[0.06] text-white/85"
                 }`}
               >
-                {msg.content}
+                {msg.role === "assistant"
+                  ? <span dangerouslySetInnerHTML={{ __html: renderMsgMarkdown(msg.content) }} />
+                  : msg.content}
               </div>
               {msg.printable && (
                 <button
@@ -1414,6 +1535,7 @@ function AIChatPanel({
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("AI");
+  const [pendingIntent, setPendingIntent] = useState<PendingIntentClient>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1446,13 +1568,14 @@ function AIChatPanel({
             return updated;
           });
         },
+        pendingIntent,
       );
+      setPendingIntent(meta.pendingIntent ?? null);
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
-      if (meta.provider) setAiProvider(meta.provider);
       if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
@@ -1487,7 +1610,7 @@ function AIChatPanel({
         </span>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(null); }}
             className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] font-semibold text-white/40 transition hover:border-orange-500/40 hover:text-orange-300"
           >
             <Plus size={11} />
@@ -1529,7 +1652,9 @@ function AIChatPanel({
                   : "bg-white/[0.06] text-white/85"
               }`}
             >
-              {msg.content}
+              {msg.role === "assistant"
+                ? <span dangerouslySetInnerHTML={{ __html: renderMsgMarkdown(msg.content) }} />
+                : msg.content}
             </div>
             {msg.printable && (
               <button
@@ -1630,6 +1755,7 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
   const [updatingProduct, setUpdatingProduct] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [inventoryView, setInventoryView] = useState<"list" | "analytics">("list");
+  const addFormRef = useRef<HTMLDivElement>(null);
   const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
 
   const analyticsData = useMemo(() => {
@@ -1866,10 +1992,15 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
           </div>
         </div>
 
-        <div className="glass rounded-md">
+        <div ref={addFormRef} className="glass rounded-md">
           <button
             type="button"
-            onClick={() => setShowAddForm((v) => !v)}
+            onClick={() => {
+              setShowAddForm((v) => {
+                if (!v) setTimeout(() => addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+                return !v;
+              });
+            }}
             className="flex w-full items-center justify-between px-5 py-4 lg:hidden"
           >
             <span className="text-sm font-black text-white">+ Nuovo prodotto</span>
@@ -1883,8 +2014,8 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
             <p className="mt-1 hidden text-sm text-white/50 lg:block">Creazione rapida su Supabase per merch e supporti fisici.</p>
             <Input name="name" label="Nome" required />
             <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
-            <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
-            <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
+            <Input name="price" label="Prezzo vendita" type="text" inputMode="decimal" />
+            <Input name="stock" label="Stock iniziale" type="text" inputMode="numeric" defaultValue="0" />
             <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
             <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
           </form>
@@ -2246,12 +2377,20 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
                     <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
                     <div className="mt-4 flex items-center justify-end gap-2">
                       <button
-                        onClick={() => downloadIcs(event)}
+                        onClick={() => openGoogleCalendar(event)}
                         className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
-                        title="Scarica ICS per Google / Apple Calendar"
+                        title="Aggiungi a Google Calendar"
                       >
                         <CalendarDays size={13} />
-                        ICS
+                        + Google Cal
+                      </button>
+                      <button
+                        onClick={() => downloadIcs(event)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
+                        title="Aggiungi a Apple Calendar / Calendario"
+                      >
+                        <CalendarDays size={13} />
+                        + Apple Cal
                       </button>
                       <button
                         onClick={() => deleteEvent(event.id)}
@@ -2941,7 +3080,7 @@ function Projects({
           <p className="text-sm text-white/40">Nessun progetto in lavorazione. Creane uno o sposta una release in "In Lavorazione" da Distrib.</p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
           {wipAlbums.map((album) => {
             const count = tracks.filter((t) => t.album_id === album.id).length;
             return (
@@ -2950,21 +3089,21 @@ function Projects({
                 onClick={() => setSelectedAlbum(album)}
                 className="glass group overflow-hidden rounded-md text-left transition hover:border-orange-400/30"
               >
-                <div className={`relative h-40 bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
+                <div className={`relative aspect-square bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
                   {album.cover_image_url ? (
                     <Image src={album.cover_image_url} alt={album.nome_album} fill className="object-cover" unoptimized />
                   ) : (
-                    <Music size={40} className="text-white/20" />
+                    <Music size={32} className="text-white/20" />
                   )}
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
-                    <span className="rounded-full bg-black/60 p-3">
-                      <Play size={20} className="text-white" fill="white" />
+                    <span className="rounded-full bg-black/60 p-2.5">
+                      <Play size={16} className="text-white" fill="white" />
                     </span>
                   </div>
                 </div>
-                <div className="p-4">
-                  <p className="font-black text-white">{album.nome_album}</p>
-                  <p className="mt-1 text-xs text-white/45">{count} {count === 1 ? "traccia" : "tracce"}</p>
+                <div className="p-3">
+                  <p className="truncate text-sm font-bold text-white">{album.nome_album}</p>
+                  <p className="mt-0.5 text-xs text-white/45">{count} {count === 1 ? "traccia" : "tracce"}</p>
                 </div>
               </button>
             );
@@ -3315,33 +3454,30 @@ function Distrib({
             {current && current.list.length === 0 ? (
               <p className="py-16 text-center text-sm text-white/30">Nessuna release in questa sezione.</p>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                 {(current ?? SECTIONS[0])?.list.map((album) => {
                   const cover = album.cover_image_url;
                   const isWip = current?.key === "wip";
                   return (
                     <article key={album.id} className="glass group overflow-hidden rounded-md">
-                      <div className="relative h-44 w-full bg-white/[0.04]">
+                      <div className="relative aspect-square w-full bg-white/[0.04]">
                         {cover ? (
                           <Image src={cover} alt={album.nome_album} fill className="object-cover" unoptimized />
                         ) : (
                           <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumGradient(album.id)}`}>
-                            <Music size={40} className="text-white/30" />
+                            <Music size={32} className="text-white/30" />
                           </div>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                        <div className="absolute bottom-3 left-3 right-3">
-                          <p className="font-black leading-tight text-white">{album.nome_album}</p>
-                          {album.release_date && (
-                            <p className="mt-0.5 text-xs text-white/60">
-                              {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "long", day: "numeric" })}
-                            </p>
-                          )}
-                        </div>
                       </div>
 
-                      <div className="p-4">
-                        <div className="flex flex-wrap gap-2">
+                      <div className="p-3">
+                        <p className="truncate text-sm font-bold leading-tight text-white">{album.nome_album}</p>
+                        {album.release_date && (
+                          <p className="mt-0.5 text-xs text-white/50 truncate">
+                            {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "short" })}
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {album.link_spotify && (
                             <a href={album.link_spotify} target="_blank" rel="noreferrer"
                               className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20">
@@ -3429,7 +3565,7 @@ function buildPressKitHtmlStyled(htmlBody: string, italianDate: string): string 
     .footer{margin-top:56px;padding-top:16px;border-top:2px solid #f97316;font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.1em}
     @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:36px 48px}}
   `;
-  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div><script>window.onload=function(){window.print();}</script></body></html>`;
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div></body></html>`;
 }
 
 // FIX 5: PressKit con download .txt e salvataggio nel vault
@@ -4429,6 +4565,15 @@ function ActionButton({ icon: Icon, text, loading = false }: { icon: typeof Plus
   );
 }
 
+// ── Markdown renderer for AI chat bubbles ────────────────────
+function renderMsgMarkdown(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
 // ── Utility ──────────────────────────────────────────────────
 
 function formatEuro(value: number | null) {
@@ -4444,32 +4589,45 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function generateIcs(event: CalendarEvent): string {
-  const dt = new Date(event.data_evento);
-  function fmt(d: Date) { return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"; }
-  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
-  return [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//SUPERFLUIDO Bunker//IT",
-    "BEGIN:VEVENT",
-    `UID:${String(event.id)}@superfluido-bunker`,
-    `DTSTART:${fmt(dt)}`,
-    `DTEND:${fmt(dtEnd)}`,
-    `SUMMARY:${event.titolo ?? ""}`,
-    event.luogo ? `LOCATION:${event.luogo}` : "",
-    event.tipo_evento ? `DESCRIPTION:${event.tipo_evento}` : "",
-    "END:VEVENT",
-    "END:VCALENDAR",
-  ].filter(Boolean).join("\r\n");
-}
-
 function downloadIcs(event: CalendarEvent) {
-  const blob = new Blob([generateIcs(event)], { type: "text/calendar" });
+  const dt = new Date(event.data_evento);
+  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const lines = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//SUPERFLUIDO Bunker//EN",
+    "BEGIN:VEVENT",
+    `DTSTART:${fmt(dt)}`, `DTEND:${fmt(dtEnd)}`,
+    `SUMMARY:${(event.titolo ?? "Evento").replace(/[\\;,]/g, (c) => "\\" + c)}`,
+    event.luogo ? `LOCATION:${event.luogo.replace(/[\\;,]/g, (c) => "\\" + c)}` : "",
+    `UID:${event.id}@superfluido-bunker`,
+    "END:VEVENT", "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+  const blob = new Blob([lines], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = `${(event.titolo ?? "evento").replace(/\s+/g, "-")}.ics`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function openGoogleCalendar(event: CalendarEvent) {
+  const dt = new Date(event.data_evento);
+  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: event.titolo ?? "",
+    dates: `${fmt(dt)}/${fmt(dtEnd)}`,
+    ...(event.luogo ? { location: event.luogo } : {}),
+    ...(event.tipo_evento ? { details: event.tipo_evento } : {}),
+  });
+  const webUrl = `https://calendar.google.com/calendar/render?${params.toString()}`;
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    // Intent URL opens Google Calendar app directly on Android, falls back to browser
+    window.location.href = `intent://calendar.google.com/calendar/render?${params.toString()}#Intent;scheme=https;package=com.google.android.calendar;S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
+  } else {
+    window.open(webUrl, "_blank");
+  }
 }

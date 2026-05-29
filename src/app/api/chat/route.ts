@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { fetchArtistAlbums, extractSpotifyId } from "@/lib/spotify";
+import fs from "node:fs";
+import path from "node:path";
 
 // These values are already committed to the repository in scripts/ — not a new exposure.
 // They serve as fallbacks when Vercel env vars are not available (e.g. preview deployments).
@@ -57,6 +60,50 @@ type WorkspaceContext = {
   }>;
 };
 
+// ─── Artist alias resolution ──────────────────────────────────────────────────
+// Maps common nicknames/abbreviations to canonical artist names.
+
+const ARTIST_ALIASES: Record<string, string> = {
+  "slam": "Slam aka Hysteriack",
+  "hysteriack": "Slam aka Hysteriack",
+  "slam aka hysteriack": "Slam aka Hysteriack",
+  "none": "NONe",
+  "gg": "gg.Proiettili",
+  "proiettili": "gg.Proiettili",
+  "gg proiettili": "gg.Proiettili",
+  "eric": "Eric Draven",
+  "draven": "Eric Draven",
+  "eric draven": "Eric Draven",
+  "leony": "Leony47",
+  "leony47": "Leony47",
+  "giord": "Giord",
+  "martire": "Martire",
+  "superfluido": "SUPERFLUIDO",
+  "collettivo": "SUPERFLUIDO",
+};
+
+function resolveArtist(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const key = raw.toLowerCase().trim();
+
+  // Exact match (fast path)
+  if (ARTIST_ALIASES[key]) return ARTIST_ALIASES[key];
+
+  // Scan for known aliases with word-boundary check (handles "slam e none", "per slam")
+  const found: string[] = [];
+  for (const [alias, canonical] of Object.entries(ARTIST_ALIASES)) {
+    const idx = key.indexOf(alias);
+    if (idx === -1) continue;
+    const before = key[idx - 1];
+    const after = key[idx + alias.length];
+    const boundary =
+      (!before || /[\s,&()]/.test(before)) && (!after || /[\s,&()]/.test(after));
+    if (boundary && !found.includes(canonical)) found.push(canonical);
+  }
+
+  return found.length > 0 ? found.join(",") : raw;
+}
+
 // ─── LLM call with retry + provider fallback ──────────────────────────────────
 
 function sleep(ms: number) {
@@ -101,32 +148,49 @@ async function callLLM(
 // ─── Intent classification ────────────────────────────────────────────────────
 
 async function classifyIntent(message: string): Promise<{ type: Intent; entities: Entities }> {
-  const prompt = `Classifica questo messaggio in uno dei 5 intent e estrai le entità. Rispondi SOLO con JSON, nessun testo extra.
+  const prompt = `Classifica questo messaggio in uno dei 5 intent ed estrai le entità. Rispondi SOLO con JSON valido, nessun testo extra.
 
-Intent:
-- press_kit: press kit, bio artistica, scheda artista, presentazione artista
-- create_task: crea task, aggiungi to-do, kanban, ricordami di
-- create_event: aggiungi al calendario, crea evento, segna data, live, showcase, sessione studio
-- search_vault: dove sono i file, cerca nel vault, trovami un documento, contratto
-- general: tutto il resto (domande, info, stato del workspace)
+INTENT:
+- press_kit: press kit, bio artistica, scheda artista, presentazione artista, profilo per booking/media
+- create_task: crea task, aggiungi to-do, kanban, ricordami di, bisogna fare
+- create_event: aggiungi al calendario, crea evento, segna data, live, showcase, sessione studio, concerto, release party
+- search_vault: dove sono i file, cerca nel vault, trovami un documento, contratto, tech rider, rider
+- general: tutto il resto (domande, info, stato del workspace, riassunti, statistiche)
 
-Entità (null se assente):
-- artist: nome artista (per press_kit)
-- recipient: destinatario press kit (media/booking/venue/distribuzione)
-- taskTitle: titolo task (per create_task)
-- deadline: data scadenza ISO (per create_task)
-- eventTitle: titolo evento (per create_event)
-- eventDate: data evento ISO (per create_event)
-- eventVenue: luogo (per create_event)
-- eventType: live|studio|riunione|release|altro (per create_event)
-- searchQuery: query ricerca (per search_vault)
+ARTISTI DEL COLLETTIVO SUPERFLUIDO (riconosci sempre questi alias):
+- "Slam aka Hysteriack" ← slam, hysteriack
+- "NONe" ← none, None, NONE
+- "gg.Proiettili" ← gg, proiettili, gg proiettili
+- "Eric Draven" ← eric, draven
+- "Leony47" ← leony, leony47
+- "Giord" ← giord
+- "Martire" ← martire
+- "SUPERFLUIDO" ← superfluido, collettivo, il collettivo
+
+ENTITÀ (usa null se assente, NON inventare):
+- artist: nome canonico artista (usa i nomi canonici sopra, non gli alias)
+- recipient: destinatario press kit → uno tra: media | booking | distribuzione | generico
+- taskTitle: titolo task — ESTRAILO DIRETTAMENTE dal messaggio, anche se non è esplicitamente "titolo"
+- deadline: data scadenza ISO 8601 (per create_task)
+- eventTitle: titolo evento — ESTRAILO dal messaggio (es. "live al Circolo" → "Live al Circolo")
+- eventDate: data ISO 8601 — converti date italiane: "venerdì" = prossimo venerdì, "domani" = domani, "15 giugno" = ${new Date().getFullYear()}-06-15, "25/06" = ${new Date().getFullYear()}-06-25T20:00:00
+- eventVenue: luogo evento se menzionato
+- eventType: live | studio | riunione | release | altro
+- searchQuery: query di ricerca (per search_vault)
+
+REGOLE:
+1. Se il messaggio cita un artista (anche soprannome), estrai sempre "artist" col nome canonico
+2. Per create_task: estrai sempre taskTitle dal testo, anche se non c'è una parola chiave esplicita
+3. Per create_event: estrai eventTitle e eventDate anche da frasi naturali
+4. Per recipient: se il messaggio dice "per media", "per booking", ecc., estrailo
+5. Sii aggressivo nell'estrazione — non lasciare null se l'info è deducibile
 
 Messaggio: "${message.replace(/"/g, "'")}"
 
 JSON:{"type":"general","entities":{"artist":null,"recipient":null,"taskTitle":null,"deadline":null,"eventTitle":null,"eventDate":null,"eventVenue":null,"eventType":null,"searchQuery":null}}`;
 
   try {
-    const raw = await callLLM([{ role: "user", content: prompt }], { maxTokens: 250, temperature: 0.1 });
+    const raw = await callLLM([{ role: "user", content: prompt }], { maxTokens: 300, temperature: 0.1 });
     const cleaned = raw.replace(/```json\n?|\n?```/g, "").trim();
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
@@ -140,109 +204,155 @@ JSON:{"type":"general","entities":{"artist":null,"recipient":null,"taskTitle":nu
 // ─── Context checking ─────────────────────────────────────────────────────────
 
 function getMissingFields(type: Intent, entities: Entities): string[] {
+  // Only artist is truly required for press_kit (title can always be inferred from message)
   if (type === "press_kit" && !entities.artist) return ["artist"];
-  if (type === "create_event") {
-    const m: string[] = [];
-    if (!entities.eventTitle) m.push("eventTitle");
-    if (!entities.eventDate) m.push("eventDate");
-    return m;
-  }
+  // For events, only date is required — title falls back to lastMessage.content
+  if (type === "create_event" && !entities.eventDate) return ["eventDate"];
   return [];
 }
 
 function buildQuestion(type: Intent, missing: string[], entities: Entities): string {
   if (type === "press_kit") {
     if (missing.includes("artist")) {
-      return "Per quale artista vuoi il press kit?\n(es. Eric Draven, Martire, gg.Proiettili, NONe, Slam, Leony47, Giord, o SUPERFLUIDO come collettivo)";
+      return `Per quale artista vuoi il press kit?
+
+→ **Eric Draven** · **Martire** · **gg.Proiettili** · **NONe** · **Slam** · **Leony47** · **Giord**
+→ oppure **SUPERFLUIDO** come collettivo`;
     }
     if (!entities.recipient) {
-      return `Perfetto! A chi è destinato il press kit per **${entities.artist}**?\n- Media / riviste musicali\n- Booking / venue\n- Distribuzione digitale / playlist\n- Uso generico`;
+      return `Press kit per **${entities.artist}** — a chi è destinato?
+
+→ **Media** (riviste, blog, giornalisti musicali)
+→ **Booking** (venue, promoter, agenzie)
+→ **Distribuzione** (label, aggregatori digitali, playlist curator)
+→ **Generico** (nessun destinatario specifico)`;
     }
   }
   if (type === "create_event") {
-    if (missing.includes("eventTitle") && missing.includes("eventDate")) {
-      return "Che titolo e data ha l'evento?";
+    if (missing.includes("eventDate")) {
+      const title = entities.eventTitle ? `"${entities.eventTitle}"` : "l'evento";
+      return `Quando si tiene ${title}? (es. "15 giugno", "25/06/2026 21:00", "venerdì prossimo")`;
     }
-    if (missing.includes("eventTitle")) return "Che titolo vuoi dare all'evento?";
-    if (missing.includes("eventDate")) return `Che data e ora ha "${entities.eventTitle}"? (es. 2026-06-15 21:00)`;
   }
   return "Puoi darmi qualche dettaglio in più?";
 }
 
+// ─── Vault document content fetcher ──────────────────────────────────────────
+// Fetches text content from files in the "Documenti" vault folder.
+// Used to give the AI real context from the collective's documents.
 
-const ARTIST_ALIASES: Record<string, string> = {
-  "eric draven": "Eric Draven", "eric": "Eric Draven", "draven": "Eric Draven",
-  "martire": "Martire",
-  "gg.proiettili": "gg.Proiettili", "gg proiettili": "gg.Proiettili", "gg": "gg.Proiettili",
-  "none": "NONe", "non e": "NONe",
-  "slam": "Slam", "hysteriack": "Slam", "slam aka hysteriack": "Slam",
-  "leony47": "Leony47", "leony": "Leony47",
-  "giord": "Giord",
-  "superfluido": "SUPERFLUIDO",
-};
-
-function resolveArtist(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const key = raw.toLowerCase().trim();
-  if (ARTIST_ALIASES[key]) return ARTIST_ALIASES[key];
-  const found: string[] = [];
-  for (const [alias, canonical] of Object.entries(ARTIST_ALIASES)) {
-    const idx = key.indexOf(alias);
-    if (idx === -1) continue;
-    const before = key[idx - 1];
-    const after = key[idx + alias.length];
-    const boundary = (!before || /[\s,&()]/.test(before)) && (!after || /[\s,&()]/.test(after));
-    if (boundary && !found.includes(canonical)) found.push(canonical);
+async function readLocalDocumenti(): Promise<string> {
+  const docsDir = path.join(process.cwd(), "DOCUMENTI");
+  if (!fs.existsSync(docsDir)) return "";
+  let filenames: string[];
+  try {
+    filenames = fs.readdirSync(docsDir).filter((f) => f.toLowerCase().endsWith(".txt"));
+  } catch { return ""; }
+  const contents: string[] = [];
+  for (const filename of filenames) {
+    try {
+      const text = fs.readFileSync(path.join(docsDir, filename), "utf8").replace(/\s+/g, " ").trim().slice(0, 5000);
+      if (text.length > 80) {
+        const tag = /tech.*rider|imbarchino|live/i.test(filename) ? "[LIVE DOC] " : "";
+        contents.push(`${tag}### ${filename.replace(/\.txt$/i, "")}\n${text}`);
+      }
+    } catch { /* skip */ }
   }
-  return found.length > 0 ? found.join(",") : raw;
+  return contents.join("\n\n---\n\n");
 }
 
 async function fetchDocumentiContent(supabase: SupabaseClient): Promise<string> {
-  try {
-    const [{ data: files }, { data: liveFiles }] = await Promise.all([
-      supabase
-        .from("vault_documenti")
-        .select("nome_file, file_url")
-        .eq("cartella", "Documenti")
-        .limit(6) as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
-      supabase
-        .from("vault_documenti")
-        .select("nome_file, file_url")
-        .ilike("nome_file", "%live%superfluido%")
-        .limit(2) as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
-    ]);
-
-    const allFiles: Array<{ nome_file: string; file_url: string | null; tag?: string }> = [
-      ...(files ?? []).map((f) => ({ ...f })),
-      ...(liveFiles ?? []).filter((lf) => !files?.some((f) => f.file_url === lf.file_url)).map((f) => ({ ...f, tag: "[LIVE DOC]" })),
-    ];
-
-    if (!allFiles.length) return "";
-
-    const contents: string[] = [];
-    for (const file of allFiles.slice(0, 6)) {
-      if (!file.file_url) continue;
+  // Local repo PDFs always available (committed to git, deployed to Vercel)
+  const [localContent, supabaseContent] = await Promise.all([
+    readLocalDocumenti(),
+    (async () => {
       try {
-        const res = await fetch(file.file_url, { signal: AbortSignal.timeout(3500) });
-        if (!res.ok) continue;
-        const raw = await res.text();
-        const text = raw
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 5000);
-        if (text.length > 80) contents.push(`${file.tag ? `${file.tag} ` : ""}### ${file.nome_file}\n${text}`);
-      } catch { /* timeout or fetch error — skip this file */ }
-    }
-    return contents.join("\n\n---\n\n");
-  } catch {
-    return "";
-  }
+        const [{ data: files }, { data: liveFiles }] = await Promise.all([
+          supabase
+            .from("vault_documenti")
+            .select("nome_file, file_url")
+            .eq("cartella", "Documenti")
+            .limit(6) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+          supabase
+            .from("vault_documenti")
+            .select("nome_file, file_url")
+            .ilike("nome_file", "%live%superfluido%")
+            .limit(2) as unknown as Promise<{ data: Array<{ nome_file: string; file_url: string | null }> | null }>,
+        ]);
+        const allFiles: Array<{ nome_file: string; file_url: string | null; tag?: string }> = [
+          ...(files ?? []).map((f) => ({ ...f })),
+          ...(liveFiles ?? []).filter((lf) => !files?.some((f) => f.file_url === lf.file_url)).map((f) => ({ ...f, tag: "[LIVE DOC]" })),
+        ];
+        const contents: string[] = [];
+        for (const file of allFiles.slice(0, 4)) {
+          if (!file.file_url) continue;
+          try {
+            const res = await fetch(file.file_url, { signal: AbortSignal.timeout(3500) });
+            if (!res.ok) continue;
+            const raw = await res.text();
+            const text = raw
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 3000);
+            if (text.length > 80) contents.push(`${file.tag ? `${file.tag} ` : ""}### ${file.nome_file}\n${text}`);
+          } catch { /* timeout or fetch error — skip */ }
+        }
+        return contents.join("\n\n---\n\n");
+      } catch { return ""; }
+    })(),
+  ]);
+  return [localContent, supabaseContent].filter(Boolean).join("\n\n---\n\n");
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
+
+type DiscoItem = { nome: string; anno: string; tipo: string };
+
+async function fetchArtistDisco(
+  artistName: string,
+  spotifyUrl?: string | null,
+): Promise<{ items: DiscoItem[]; source: "spotify" | "deezer" | "db" }> {
+  // 1. Spotify (via artist profile URL)
+  const artistId = spotifyUrl ? extractSpotifyId(spotifyUrl, "artist") : null;
+  if (artistId) {
+    try {
+      const data = await fetchArtistAlbums(artistId);
+      const items = (data.items ?? []).map((d: { name: string; release_date: string; album_type: string }) => ({
+        nome: d.name,
+        anno: d.release_date?.slice(0, 4) ?? "—",
+        tipo: d.album_type,
+      }));
+      if (items.length > 0) return { items, source: "spotify" };
+    } catch { /* fall through */ }
+  }
+  // 2. Deezer public API (no credentials needed)
+  try {
+    const searchRes = await fetch(
+      `https://api.deezer.com/search/artist?q=${encodeURIComponent(artistName)}&limit=1`,
+      { signal: AbortSignal.timeout(3000) },
+    );
+    const searchData = await searchRes.json() as { data?: { id: number }[] };
+    const deezerArtistId = searchData?.data?.[0]?.id;
+    if (deezerArtistId) {
+      const albumRes = await fetch(
+        `https://api.deezer.com/artist/${deezerArtistId}/albums?limit=50`,
+        { signal: AbortSignal.timeout(3000) },
+      );
+      const albumData = await albumRes.json() as { data?: { title: string; release_date: string; record_type: string }[] };
+      const items = (albumData?.data ?? []).map((d) => ({
+        nome: d.title,
+        anno: d.release_date?.slice(0, 4) ?? "—",
+        tipo: d.record_type,
+      }));
+      if (items.length > 0) return { items, source: "deezer" };
+    }
+  } catch { /* fall through */ }
+  // 3. Fallback: DB context
+  return { items: [], source: "db" };
+}
 
 async function handlePressKit(
   entities: Entities,
@@ -253,49 +363,56 @@ async function handlePressKit(
   const artists = artistStr.split(",").map((a) => a.trim()).filter(Boolean);
   const recipient = entities.recipient ?? "generico";
   const year = new Date().getFullYear();
-  const events = (context.eventi ?? []).slice(0, 5);
   const discography = (context.discografia ?? [])
     .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0))
     .slice(0, 12);
 
-  const getProfile = (a: string) =>
+  const getProfile = (artist: string) =>
     context.profili?.find(
       (p) =>
-        p.nome_arte?.toLowerCase().includes(a.toLowerCase()) ||
-        a.toLowerCase().includes((p.nome_arte ?? "").toLowerCase()),
+        p.nome_arte?.toLowerCase().includes(artist.toLowerCase()) ||
+        artist.toLowerCase().includes((p.nome_arte ?? "").toLowerCase()),
     ) ?? null;
 
   const sysPrompt = `Sei un copywriter professionista specializzato in musica hip-hop italiana indipendente.
 Scrivi press kit professionali, credibili e coinvolgenti in italiano corretto.
 Tono: autorevole, diretto, adatto al mondo musicale underground italiano.
-Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi generiche di riempimento.`;
+Non inventare dati non presenti nel contesto fornito. Non aggiungere frasi generiche di riempimento.
+La sezione ## Biografia deve contenere SOLO testo narrativo (background, stile, visione artistica). NON inserire URL, email, handle social (@...) o titoli di release nella biografia — quelli vanno nelle rispettive sezioni dedicate.
+Le sezioni marcate {{VERBATIM}} devono essere riprodotte esattamente come scritte nel template, senza aggiungere testo introduttivo, descrittivo o conclusivo.`;
 
   let userPrompt: string;
   let maxTokens = 2000;
 
   if (artists.length > 1) {
     maxTokens = 3500;
-    const artistSections = artists.map((artist) => {
+    const artistSections = (await Promise.all(artists.map(async (artist) => {
       const profile = getProfile(artist);
       const profileInfo = profile
         ? `Ruolo: ${profile.ruolo ?? "—"} | Bio: ${profile.bio ?? "—"} | Instagram: ${profile.instagram ?? "—"} | Email: ${profile.email ?? "—"}`
         : `Membro del collettivo SUPERFLUIDO (Roma, 2021). Hip-hop underground italiano.`;
-      const artistSpotifyLinks = discography.filter((d) => d.spotify).slice(0, 4);
+      const { items: artistDisco, source: artistDiscoSrc } = await fetchArtistDisco(artist, profile?.spotify);
+      const useArtistStreaming = artistDisco.length > 0;
+      const artistDiscoItems = useArtistStreaming ? artistDisco : discography;
+      const artistDiscoNote = useArtistStreaming
+        ? `Discografia ufficiale da ${artistDiscoSrc === "spotify" ? "Spotify" : "Deezer"} (già filtrata — includila tutta):`
+        : `Lista DB da filtrare — includi SOLO tracce dove il nome "${artist}" appare nel titolo:`;
       return `## ${artist}
 
 ### Biografia
-[150-250 parole. Profilo: ${profileInfo}]
+[150-250 parole. Profilo: ${profileInfo}. Solo testo narrativo, no URL o titoli di release.]
 
 ### Discografia
-[Includi SOLO i lavori dove **${artist}** è coinvolto. Lista da filtrare:
-${discography.length > 0
-        ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+[${artistDiscoNote}
+${artistDiscoItems.length > 0
+        ? artistDiscoItems.map((d) => `- **${d.nome}** (${d.anno}) · ${d.tipo}`).join("\n")
         : "[Discografia in aggiornamento]"}]
 
-### Contatti & Link
+### Contatti
+{{VERBATIM}}
 - Email: ${profile?.email ?? "superfluido@booking.com"}
-- Instagram: ${profile?.instagram ?? "@superfluido_official"}${artistSpotifyLinks.length > 0 ? `\n${artistSpotifyLinks.map((d) => `- ${d.nome}: ${d.spotify}`).join("\n")}` : ""}`;
-    }).join("\n\n---\n\n");
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}`;
+    }))).join("\n\n---\n\n");
 
     userPrompt = `Genera un press kit collettivo professionale per ${artists.join(" & ")} — artisti del collettivo SUPERFLUIDO. Struttura obbligatoria:
 
@@ -316,54 +433,65 @@ Ultima riga OBBLIGATORIA: [PRINTABLE]`;
       ? `Nome d'arte: ${profile.nome_arte}\nRuolo/Strumento: ${profile.ruolo}\nBio: ${profile.bio}\nInstagram: ${profile.instagram}\nSpotify: ${profile.spotify}\nEmail: ${profile.email}`
       : `Artista del collettivo SUPERFLUIDO. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021.\nInstagram: @superfluido_official | Email: superfluido@booking.com`;
 
-    const groupAlbums = (context.discografia ?? [])
-      .filter((d) => /album/i.test(d.tipo ?? ""))
-      .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0));
-    const groupOthers = (context.discografia ?? [])
-      .filter((d) => !/album/i.test(d.tipo ?? ""))
-      .sort((a, b) => Number(b.anno ?? 0) - Number(a.anno ?? 0));
-    const groupDisco = [...groupAlbums, ...groupOthers];
+    // Detect singles by tipo field OR "- Single" suffix in name (DB defaults tipo to "album" for everything)
+    const isSingle = (d: { nome: string; tipo: string | null | undefined }) =>
+      /\bsingle\b/i.test(d.tipo ?? "") || / - single\s*$/i.test(d.nome ?? "");
+    const byAnno = (a: { anno?: string | null }, b: { anno?: string | null }) =>
+      Number(b.anno ?? 0) - Number(a.anno ?? 0);
+    const groupProjects = (context.discografia ?? []).filter((d) => !isSingle(d)).sort(byAnno);
+    const groupSingles = (context.discografia ?? []).filter((d) => isSingle(d)).sort(byAnno);
+    const groupDisco = [...groupProjects, ...groupSingles];
 
     const spotifyLinks = discography.filter((d) => d.spotify).slice(0, 6);
     const hasLiveDoc = docsContent.includes("[LIVE DOC]");
+
+    const { items: streamingDisco, source: discoSrc } = await fetchArtistDisco(artist, profile?.spotify);
+    const useStreaming = streamingDisco.length > 0;
+    const discoItems = useStreaming ? streamingDisco : discography;
+    const discoNote = useStreaming
+      ? `Discografia ufficiale da ${discoSrc === "spotify" ? "Spotify" : "Deezer"} (già filtrata per questo artista — includila tutta ordinata per anno):`
+      : `Lista DB da filtrare — includi SOLO tracce dove "${artist}" appare nel titolo:`;
 
     userPrompt = `Genera un press kit professionale seguendo ESATTAMENTE questo template:
 
 # ${artist} — Press Kit ${year}
 
 ## Biografia
-[350-500 parole. Profilo: ${profileInfo}. Narrativa fluida, senza elenchi puntati.]
+[350-500 parole. Profilo: ${profileInfo}. Narrativa fluida, senza elenchi puntati. VINCOLO: la biografia NON deve citare URL, email, handle social o titoli di release. Solo testo narrativo su background, stile e visione artistica.]
 
 ## Discografia
-[Includi SOLO i lavori dove **${artist}** è artista principale o featured. Escludi release dove ${artist} non è coinvolto. Lista completa da filtrare:
-${discography.length > 0
-      ? discography.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+[${discoNote}
+${discoItems.length > 0
+      ? discoItems.map((d) => `- **${d.nome}** (${d.anno}) · ${d.tipo}`).join("\n")
       : "[Discografia in aggiornamento]"}]
 
-## Live & Collaborazioni
-[${events.length > 0 ? `Prossimi eventi: ${events.map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join("; ")}. ` : ""}Descrivi l'approccio live di SUPERFLUIDO come collettivo e le collaborazioni di ${artist} all'interno del gruppo.${hasLiveDoc ? " Usa le informazioni dal documento live nel Vault." : ""}]
+## Live
+[Descrivi l'attività live passata di SUPERFLUIDO come collettivo: concerti, showcase, festival già effettuati. NON menzionare eventi futuri, date di calendario o informazioni organizzative interne.${hasLiveDoc ? " Usa come base principale le informazioni del documento live nel Vault." : " Scrivi 2-4 frasi sull'approccio live e sull'energia dal vivo del collettivo."}]
 
 ## SUPERFLUIDO — Il Collettivo
-[Bio del collettivo SUPERFLUIDO in 150-200 parole. MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack. Produttori: Leony47, Giord. Roma, 2021. Hip-hop underground italiano.]
+[Bio del collettivo SUPERFLUIDO. IMPORTANTE: se nei Documenti Vault è presente un testo di presentazione del collettivo (documento "PRESENTAZIONE" o simile), usalo come base principale — mantieni tono, parole chiave e informazioni originali del documento. Non inventare. Se non disponibile: 150-200 parole, Roma 2021, hip-hop underground, MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack, Produttori: Leony47, Giord.]
 
 ### Discografia Completa SUPERFLUIDO
-${groupDisco.length > 0
-      ? groupDisco.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
-      : "[In aggiornamento]"}
+[USA il documento "PRESENTAZIONE Superfluido" nei Documenti Vault per la lista completa. Riporta TUTTI i progetti (LP, EP, album) ordinati dal più recente al più vecchio. ESCLUDI completamente i singoli. Se il documento non è disponibile, usa la lista DB qui sotto — stessa regola: solo progetti, no singoli, ordine cronologico inverso:
+${groupProjects.length > 0
+        ? groupProjects.map((d) => `- **${d.nome}** (${d.anno ?? "—"}) · ${d.tipo}`).join("\n")
+        : "[Progetti in aggiornamento]"}]
 
-## Contatti & Link
-- Email booking: ${profile?.email ?? "superfluido@booking.com"}
-- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}${spotifyLinks.length > 0 ? `\n\n### Link Streaming\n${spotifyLinks.map((d) => `- ${d.nome}: ${d.spotify}`).join("\n")}` : ""}
+## Contatti
+{{VERBATIM}}
+- Email: ${profile?.email ?? "superfluido@booking.com"}
+- Instagram: ${profile?.instagram ?? "@superfluido_official"}${profile?.spotify ? `\n- Spotify: ${profile.spotify}` : ""}${spotifyLinks.length > 0 ? `\n${spotifyLinks.map((d) => `- Spotify ${d.nome}: ${d.spotify}`).join("\n")}` : ""}
 
 ---
 Destinatario: **${recipient}** — adatta tono ed enfasi.${docsContent ? `\n\nDocumenti Vault:\n${docsContent}` : ""}
 Ultima riga OBBLIGATORIA: [PRINTABLE]`;
   }
 
-  return callLLM(
+  const raw = await callLLM(
     [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
     { maxTokens, temperature: 0.72 },
   );
+  return raw.replace(/\{\{VERBATIM\}\}\n?/g, "");
 }
 
 function handleVault(query: string, context: WorkspaceContext): string {
@@ -381,15 +509,38 @@ async function handleGeneral(
   message: string,
   history: ChatMessage[],
   context: WorkspaceContext,
+  docsContent: string,
 ): Promise<string> {
+  const taskOpen = (context.tasks ?? []).filter((t) => t.stato !== "Done" && t.stato !== "Completato");
+  const taskDone = (context.tasks ?? []).filter((t) => t.stato === "Done" || t.stato === "Completato");
+
   const sysPrompt = `Sei l'assistente operativo di SUPERFLUIDO Bunker — sistema gestionale del collettivo hip-hop indipendente SUPERFLUIDO, fondato a Roma nel 2021.
-MC: Eric Draven, Martire, gg.Proiettili, NONe, Slam aka Hysteriack | Produttori: Leony47, Giord.
-Social: Instagram @superfluido_official | Booking: superfluido@booking.com
 
-Rispondi SEMPRE in italiano. Tono diretto, concreto, breve. Niente frasi di riempimento.
+COLLETTIVO:
+MC: Eric Draven (aka Eric), Martire, gg.Proiettili (aka gg), NONe (aka none), Slam aka Hysteriack (aka Slam)
+Produttori: Leony47 (aka Leony), Giord
+Genere: hip-hop underground italiano. Base: Roma. Attivi dal 2021.
+Instagram: @superfluido_official | Booking: superfluido@booking.com
 
-Contesto workspace attuale:
-${JSON.stringify(context, null, 2)}`;
+WORKSPACE ATTUALE:
+- Task aperti (${taskOpen.length}): ${taskOpen.map((t) => `"${t.titolo}" [${t.stato}]${t.scadenza ? ` scad. ${t.scadenza}` : ""}`).join(", ") || "nessuno"}
+- Task completati: ${taskDone.length}
+- Prossimi eventi (${(context.eventi ?? []).length}): ${(context.eventi ?? []).map((e) => `${e.titolo} — ${e.data}${e.luogo ? ` @ ${e.luogo}` : ""}`).join(", ") || "nessuno"}
+- Album in lavorazione: ${(context.album_in_lavorazione ?? []).map((a) => a.nome).join(", ") || "nessuno"}
+- Discografia (uscite): ${(context.discografia ?? []).length} release
+- Profili artisti: ${(context.profili ?? []).map((p) => p.nome_arte).filter(Boolean).join(", ")}
+- File nel Vault: ${(context.vault ?? []).length} documenti${docsContent ? `
+
+DOCUMENTI VAULT (cartella Documenti):
+${docsContent}` : ""}
+
+ISTRUZIONI:
+- Rispondi SEMPRE in italiano. Tono diretto, concreto, senza frasi di riempimento.
+- Se chiedono un riassunto del workspace: elenca task aperti, eventi imminenti, album in lavorazione.
+- Se chiedono info su un documento del Vault: usa i DOCUMENTI VAULT sopra.
+- Se chiedono statistiche: calcola dai dati del workspace.
+- Se chiedono di un artista: usa i profili nel workspace.
+- Non inventare dati. Se un'info non è nel contesto, dillo chiaramente.`;
 
   const msgs: AIMessage[] = [
     { role: "system", content: sysPrompt },
@@ -435,14 +586,15 @@ export async function POST(request: Request) {
         ...body.pendingIntent.entities,
         ...Object.fromEntries(Object.entries(fresh.entities).filter(([, v]) => v != null)),
       };
-      // Direct mapping fallback for short follow-up answers the LLM may misclassify
+
+      // Direct mapping for follow-up answers — more reliable than LLM on short isolated words
       if (intentType === "press_kit") {
         const msg = lastMessage.content.toLowerCase();
         if (!entities.recipient) {
-          if (/media|riviste|giornalisti|blog/.test(msg)) entities.recipient = "media";
-          else if (/booking|venue|promoter|agenzi/.test(msg)) entities.recipient = "booking";
-          else if (/distribuz|label|aggregatori|playlist|digitali/.test(msg)) entities.recipient = "distribuzione";
-          else if (/generic|nessun/.test(msg)) entities.recipient = "generico";
+          if (/media|riviste|giornalisti|blog/.test(msg))                       entities.recipient = "media";
+          else if (/booking|venue|promoter|agenzi/.test(msg))                   entities.recipient = "booking";
+          else if (/distribuz|label|aggregatori|playlist|digitali/.test(msg))   entities.recipient = "distribuzione";
+          else if (/generic|nessun/.test(msg))                                  entities.recipient = "generico";
         }
         if (!entities.artist) {
           const resolved = resolveArtist(lastMessage.content.trim());
@@ -453,12 +605,12 @@ export async function POST(request: Request) {
       const classified = await classifyIntent(lastMessage.content);
       intentType = classified.type;
       entities = classified.entities;
-      if (intentType === "press_kit" && entities.artist) {
-        entities.artist = resolveArtist(entities.artist) ?? entities.artist;
-      }
     }
 
-    // ── Step 2: Check for missing required context ─────────────────────────────
+    // ── Step 2: Resolve artist aliases ────────────────────────────────────────
+    entities.artist = resolveArtist(entities.artist);
+
+    // ── Step 3: Check for missing required context ─────────────────────────────
     const missing = getMissingFields(intentType, entities);
     // For press_kit: also ask for recipient if artist is known but recipient is not
     const needsRecipient = intentType === "press_kit" && !!entities.artist && !entities.recipient;
@@ -473,9 +625,13 @@ export async function POST(request: Request) {
       });
     }
 
-    // ── Step 3: Execute handler ────────────────────────────────────────────────
-    const docsContent = supabase ? await fetchDocumentiContent(supabase) : "";
+    // ── Step 4: Fetch vault docs for context-heavy intents ─────────────────────
+    let docsContent = "";
+    if (supabase && (intentType === "general" || intentType === "press_kit")) {
+      docsContent = await fetchDocumentiContent(supabase);
+    }
 
+    // ── Step 5: Execute handler ────────────────────────────────────────────────
     switch (intentType) {
       case "press_kit": {
         const raw = await handlePressKit(entities, context, docsContent);
@@ -538,7 +694,7 @@ export async function POST(request: Request) {
       }
 
       default: {
-        const text = await handleGeneral(lastMessage.content, history, context);
+        const text = await handleGeneral(lastMessage.content, history, context, docsContent);
         return NextResponse.json({ text, actionPerformed: false, printable: false });
       }
     }
