@@ -111,6 +111,39 @@ const sampleState: AppState = {
   tasks: [],
 };
 
+function useMagnetic(strength = 0.3) {
+  const ref = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    function handleMove(e: MouseEvent) {
+      const rect = el!.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dx = (e.clientX - cx) * strength;
+      const dy = (e.clientY - cy) * strength;
+      el!.style.transform = `translate(${dx}px, ${dy}px)`;
+    }
+
+    function handleLeave() {
+      el!.style.transform = "";
+      el!.style.transition = "transform 0.4s cubic-bezier(0.16,1,0.3,1)";
+      setTimeout(() => { el!.style.transition = ""; }, 400);
+    }
+
+    el.addEventListener("mousemove", handleMove);
+    el.addEventListener("mouseleave", handleLeave);
+    return () => {
+      el.removeEventListener("mousemove", handleMove);
+      el.removeEventListener("mouseleave", handleLeave);
+    };
+  }, [strength]);
+
+  return ref;
+}
+
 export function SuperfluidoApp() {
   const [view, setView] = useState<View>("home");
   const [user, setUser] = useState<AppUser | null>(null);
@@ -827,6 +860,8 @@ function trackPhaseBadge(fase: string | null) {
 }
 
 function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: { state: AppState; user: AppUser; goTo: (view: View) => void; onToast: (text: string, kind?: "error" | "success") => void; reload: () => Promise<void>; dataLoading?: boolean }) {
+  const aiChatBtnRef = useMagnetic(0.25);
+  const studioBtnRef = useMagnetic(0.25);
   const [activityFeed, setActivityFeed] = useState<Array<{ id: string; text: string; time: Date }>>([]);
 
   const totalStock = state.products.reduce(
@@ -899,13 +934,14 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <button
+              ref={aiChatBtnRef}
               onClick={() => document.getElementById("overview-ai-chat")?.scrollIntoView({ behavior: "smooth", block: "start" })}
               className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-400"
             >
               <Sparkles size={18} />
               Chiedi all&apos;AI
             </button>
-            <button onClick={() => goTo("projects")} className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white transition hover:border-white/25">
+            <button ref={studioBtnRef} onClick={() => goTo("projects")} className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white transition hover:border-white/25">
               <FileAudio size={18} />
               Studio Hub
             </button>
