@@ -44,6 +44,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
+import { SkeletonCard, SkeletonRow, SkeletonMetric } from "@/components/skeleton";
 
 type View = "home" | "inventory" | "calendar" | "projects" | "distrib" | "profile" | "vault";
 
@@ -112,6 +113,7 @@ export function SuperfluidoApp() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [state, setState] = useState<AppState>(emptyState);
   const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
@@ -219,6 +221,7 @@ export function SuperfluidoApp() {
 
   // FIX 1: loadWorkspace senza fallback a sample data, senza filtro caricato_da sulle tracce
   async function loadWorkspace(userId: string) {
+    setDataLoading(true);
     const supabase = getSupabase();
 
     const [products, events, albums, tracks, profiles, vault, folders, tasks] = await Promise.all([
@@ -232,7 +235,6 @@ export function SuperfluidoApp() {
       supabase.from("tasks_kanban").select("*").order("created_at"),
     ]);
 
-    // Suppress unused variable warning
     void userId;
 
     setState({
@@ -245,6 +247,8 @@ export function SuperfluidoApp() {
       folders: (folders.data ?? []) as VaultFolder[],
       tasks: (tasks.data ?? []) as KanbanTask[],
     });
+
+    setDataLoading(false);
   }
 
   async function handleLogin(email: string, password: string) {
@@ -402,7 +406,7 @@ export function SuperfluidoApp() {
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
           >
-            {view === "home" && <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} />}
+            {view === "home" && <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} dataLoading={dataLoading} />}
             {view === "inventory" && <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
             {view === "calendar" && <CalendarModule events={state.events} tasks={state.tasks} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
             {view === "projects" && (
@@ -761,7 +765,7 @@ function trackPhaseBadge(fase: string | null) {
   return map[fase ?? ""] ?? "bg-white/10 text-white/40";
 }
 
-function Overview({ state, user, goTo, onToast, reload }: { state: AppState; user: AppUser; goTo: (view: View) => void; onToast: (text: string, kind?: "error" | "success") => void; reload: () => Promise<void> }) {
+function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: { state: AppState; user: AppUser; goTo: (view: View) => void; onToast: (text: string, kind?: "error" | "success") => void; reload: () => Promise<void>; dataLoading?: boolean }) {
   const totalStock = state.products.reduce(
     (sum, product) => sum + (product.product_variants ?? []).reduce((variantSum, variant) => variantSum + Number(variant.stock_quantity ?? 0), 0),
     0,
@@ -830,14 +834,20 @@ function Overview({ state, user, goTo, onToast, reload }: { state: AppState; use
       </section>
       </motion.div>
 
-      <motion.div variants={metricContainer} initial="hidden" animate="visible">
-      <section className="metric-grid mt-5 grid gap-4">
-        <motion.div variants={metricItem}><Metric title="Stock totale" value={totalStock.toString()} tone="orange" /></motion.div>
-        <motion.div variants={metricItem}><Metric title="Alert stock" value={lowStock.length.toString()} tone="red" /></motion.div>
-        <motion.div variants={metricItem}><Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" /></motion.div>
-        <motion.div variants={metricItem}><Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" /></motion.div>
-      </section>
-      </motion.div>
+      {dataLoading ? (
+        <section className="metric-grid mt-5 grid gap-4">
+          <SkeletonMetric /><SkeletonMetric /><SkeletonMetric /><SkeletonMetric />
+        </section>
+      ) : (
+        <motion.div variants={metricContainer} initial="hidden" animate="visible">
+          <section className="metric-grid mt-5 grid gap-4">
+            <motion.div variants={metricItem}><Metric title="Stock totale" value={totalStock.toString()} tone="orange" /></motion.div>
+            <motion.div variants={metricItem}><Metric title="Alert stock" value={lowStock.length.toString()} tone="red" /></motion.div>
+            <motion.div variants={metricItem}><Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" /></motion.div>
+            <motion.div variants={metricItem}><Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" /></motion.div>
+          </section>
+        </motion.div>
+      )}
 
       {/* Inline AI chat embed */}
       <section className="mt-5" id="overview-ai-chat">
