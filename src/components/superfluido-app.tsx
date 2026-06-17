@@ -2250,6 +2250,7 @@ function NowPlayingBar({
   const waveRef = useRef<number[]>([]);
   const rafRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number>(0);
   const barsRef = useRef<HTMLDivElement[]>([]);
   const [analyserReady, setAnalyserReady] = useState(false);
@@ -2270,6 +2271,7 @@ function NowPlayingBar({
       if (!analyserRef.current && audioRef.current) {
         try {
           const ctx = new AudioContext();
+          audioCtxRef.current = ctx;
           const source = ctx.createMediaElementSource(audioRef.current);
           const analyser = ctx.createAnalyser();
           analyser.fftSize = 64;
@@ -2288,6 +2290,7 @@ function NowPlayingBar({
   }, [track.id]);
 
   useEffect(() => {
+    if (analyserReady) return;
     function frame() {
       const canvas = canvasRef.current;
       const audio = audioRef.current;
@@ -2319,7 +2322,7 @@ function NowPlayingBar({
     }
     rafRef.current = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [track.id]);
+  }, [track.id, analyserReady]);
 
   useEffect(() => {
     if (!analyserReady || !analyserRef.current) return;
@@ -2345,6 +2348,13 @@ function NowPlayingBar({
     animFrameRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [analyserReady]);
+
+  useEffect(() => {
+    return () => {
+      cancelAnimationFrame(animFrameRef.current);
+      audioCtxRef.current?.close();
+    };
+  }, []);
 
   useEffect(() => {
     function resize() {
