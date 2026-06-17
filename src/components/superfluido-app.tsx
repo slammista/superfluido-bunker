@@ -45,6 +45,7 @@ import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
 import { SkeletonCard, SkeletonRow, SkeletonMetric } from "@/components/skeleton";
+import { Tooltip } from "@/components/tooltip";
 
 type View = "home" | "inventory" | "calendar" | "projects" | "distrib" | "profile" | "vault";
 
@@ -441,15 +442,17 @@ export function SuperfluidoApp() {
       )}
 
       {/* Floating AI chat button */}
-      <motion.button
-        onClick={() => setChatOpen((o) => !o)}
-        whileHover={{ scale: 1.08 }}
-        whileTap={{ scale: 0.94 }}
-        className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
-        title="AI Assistant"
-      >
-        <Sparkles size={22} />
-      </motion.button>
+      <Tooltip content="AI Assistant" side="left">
+        <motion.button
+          onClick={() => setChatOpen((o) => !o)}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.94 }}
+          className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
+          aria-label="AI Assistant"
+        >
+          <Sparkles size={22} />
+        </motion.button>
+      </Tooltip>
 
       {/* AI chat slide-in panel */}
       <AIChatPanel
@@ -992,9 +995,11 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
                 <motion.div key={track.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05, duration: 0.2 }} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5">
                   <Music size={12} className="shrink-0 text-white/25" />
                   <p className="flex-1 truncate text-sm font-semibold text-white/80">{track.nome_traccia}</p>
-                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${trackPhaseBadge(track.fase)}`}>
-                    {track.fase ?? "—"}
-                  </span>
+                  <Tooltip content={`Fase: ${track.fase ?? "Non definita"}`} side="left">
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${trackPhaseBadge(track.fase)}`}>
+                      {track.fase ?? "—"}
+                    </span>
+                  </Tooltip>
                 </motion.div>
               ))}
             </div>
