@@ -787,77 +787,96 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
     .slice(0, 5);
   const recentTracks = state.tracks.slice(0, 5);
 
-  const metricContainer = {
-    hidden: {},
-    visible: { transition: { staggerChildren: 0.07 } },
-  };
-  const metricItem = {
-    hidden: { opacity: 0, y: 12 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.22 } },
-  };
+  const metrics = [
+    { title: "Stock totale", value: totalStock.toString(), tone: "orange" as const },
+    { title: "Alert stock",  value: lowStock.length.toString(), tone: "red" as const },
+    { title: "Tracce",       value: state.tracks.length.toString(), tone: "blue" as const },
+    { title: "Profili",      value: state.profiles.length.toString(), tone: "green" as const },
+  ];
 
   return (
     <>
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-      <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="glass overflow-hidden rounded-md p-6 md:p-8">
+      {/* BENTO GRID: hero (2-row tall) + 4 metrics + session bar */}
+      <section className="grid grid-cols-2 gap-5 lg:grid-cols-4">
+
+        {/* Hero — spans 2 cols on mobile, stays 2 cols on desktop (col 1+2 of 4) and spans 2 rows */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          className="col-span-2 lg:row-span-2 glass overflow-hidden rounded-lg p-6 md:p-8"
+        >
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-orange-300">Control room</p>
-          <h1 className="mt-3 max-w-3xl text-4xl font-black leading-[0.95] tracking-tight text-white md:text-7xl">
-            SUPERFLUIDO Bunker
+          <h1 className="mt-3 text-4xl font-black leading-[0.95] tracking-tight text-white md:text-6xl lg:text-7xl" style={{ textWrap: "balance" } as React.CSSProperties}>
+            SUPERFLUIDO<br className="hidden md:block" />
+            Bunker
           </h1>
-          <p className="mt-5 max-w-2xl text-base leading-7 text-white/62">
+          <p className="mt-5 max-w-xl text-base leading-7 text-white/62">
             Dashboard operativa per studio, release, eventi, merch e press kit. Collegata a Supabase e pronta per Vercel.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <button
               onClick={() => document.getElementById("overview-ai-chat")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300"
+              className="inline-flex items-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-400"
             >
               <Sparkles size={18} />
-              Chiedi all'AI
+              Chiedi all&apos;AI
             </button>
             <button onClick={() => goTo("projects")} className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white transition hover:border-white/25">
               <FileAudio size={18} />
-              Apri Studio Hub
+              Studio Hub
             </button>
           </div>
-        </div>
-
-        <div className="glass rounded-md p-6">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/45">Sessione</p>
-          <p className="mt-3 text-xl font-black text-white">{user.email}</p>
-          <p className="text-sm text-orange-200">{user.role}</p>
-          <div className="mt-8 space-y-3">
-            {[
-              ["Magazzino", `${totalStock} pezzi`],
-              ["Eventi", `${state.events.length} in calendario`],
-              ["Tracce", `${state.tracks.length} in lavorazione`],
-              ["Vault", `${state.vault.length} documenti`],
-            ].map(([label, value]) => (
-              <div key={label} className="flex items-center justify-between border-b border-white/8 pb-3">
-                <span className="text-sm text-white/54">{label}</span>
-                <span className="font-mono text-sm text-white">{value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-      </motion.div>
-
-      {dataLoading ? (
-        <section className="metric-grid mt-5 grid gap-4">
-          <SkeletonMetric /><SkeletonMetric /><SkeletonMetric /><SkeletonMetric />
-        </section>
-      ) : (
-        <motion.div variants={metricContainer} initial="hidden" animate="visible">
-          <section className="metric-grid mt-5 grid gap-4">
-            <motion.div variants={metricItem}><Metric title="Stock totale" value={totalStock.toString()} tone="orange" /></motion.div>
-            <motion.div variants={metricItem}><Metric title="Alert stock" value={lowStock.length.toString()} tone="red" /></motion.div>
-            <motion.div variants={metricItem}><Metric title="Release assets" value={state.tracks.length.toString()} tone="blue" /></motion.div>
-            <motion.div variants={metricItem}><Metric title="Profili artisti" value={state.profiles.length.toString()} tone="green" /></motion.div>
-          </section>
         </motion.div>
-      )}
+
+        {/* 4 Metrics — fill the 2×2 right area on desktop, 2×2 grid on mobile */}
+        {dataLoading ? (
+          <>
+            <SkeletonMetric /><SkeletonMetric /><SkeletonMetric /><SkeletonMetric />
+          </>
+        ) : (
+          metrics.map((m, i) => (
+            <motion.div
+              key={m.title}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, delay: 0.08 + i * 0.05, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <Metric title={m.title} value={m.value} tone={m.tone} />
+            </motion.div>
+          ))
+        )}
+
+        {/* Session bar — spans all 4 cols (or 2 on mobile) */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, delay: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          className="col-span-2 lg:col-span-4 glass rounded-lg p-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/45">Sessione attiva</p>
+              <p className="mt-1 text-base font-black text-white">{user.email}</p>
+              <p className="text-xs text-orange-200">{user.role}</p>
+            </div>
+            <div className="flex flex-wrap gap-6">
+              {([
+                ["Magazzino", totalStock],
+                ["Eventi", state.events.length],
+                ["Tracce", state.tracks.length],
+                ["Vault", state.vault.length],
+              ] as const).map(([label, value]) => (
+                <div key={label} className="text-center">
+                  <p className="font-mono text-2xl font-black text-white">{value}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-white/40">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
+      </section>
 
       {/* Inline AI chat embed */}
       <section className="mt-5" id="overview-ai-chat">
