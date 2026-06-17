@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
@@ -122,6 +122,7 @@ export function SuperfluidoApp() {
   const [playerAlbumTracks, setPlayerAlbumTracks] = useState<Track[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [headerScrolled, setHeaderScrolled] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
   useEffect(() => {
     function onScroll() { setHeaderScrolled(window.scrollY > 20); }
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -402,10 +403,16 @@ export function SuperfluidoApp() {
         <AnimatePresence mode="wait">
           <motion.div
             key={view}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
+            initial={prefersReducedMotion
+              ? { opacity: 0 }
+              : { opacity: 0, clipPath: "inset(0 100% 0 0 round 6px)" }}
+            animate={prefersReducedMotion
+              ? { opacity: 1 }
+              : { opacity: 1, clipPath: "inset(0 0% 0 0 round 0px)" }}
+            exit={prefersReducedMotion
+              ? { opacity: 0 }
+              : { opacity: 0, clipPath: "inset(0 0% 0 100% round 6px)" }}
+            transition={{ duration: prefersReducedMotion ? 0.15 : 0.3, ease: [0.16, 1, 0.3, 1] }}
           >
             {view === "home" && <Overview state={state} user={user} goTo={setView} onToast={showToast} reload={() => loadWorkspace(user.id)} dataLoading={dataLoading} />}
             {view === "inventory" && <Inventory products={state.products} user={user} reload={() => loadWorkspace(user.id)} onToast={showToast} />}
