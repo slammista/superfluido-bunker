@@ -827,6 +827,8 @@ function trackPhaseBadge(fase: string | null) {
 }
 
 function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: { state: AppState; user: AppUser; goTo: (view: View) => void; onToast: (text: string, kind?: "error" | "success") => void; reload: () => Promise<void>; dataLoading?: boolean }) {
+  const [activityFeed, setActivityFeed] = useState<Array<{ id: string; text: string; time: Date }>>([]);
+
   const totalStock = state.products.reduce(
     (sum, product) => sum + (product.product_variants ?? []).reduce((variantSum, variant) => variantSum + Number(variant.stock_quantity ?? 0), 0),
     0,
@@ -844,6 +846,36 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
     { title: "Tracce",       value: state.tracks.length.toString(), tone: "blue" as const },
     { title: "Profili",      value: state.profiles.length.toString(), tone: "green" as const },
   ];
+
+  function pushActivity(text: string) {
+    setActivityFeed((prev) => [
+      { id: crypto.randomUUID(), text, time: new Date() },
+      ...prev.slice(0, 4),
+    ]);
+  }
+
+  useEffect(() => {
+    const supabase = getSupabase();
+
+    const channel = supabase
+      .channel("activity-feed")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "products" }, (p) => {
+        pushActivity(`Nuovo prodotto: ${(p.new as { name?: string }).name ?? "—"}`);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tracce_audio" }, (p) => {
+        pushActivity(`Nuova traccia: ${(p.new as { nome_traccia?: string }).nome_traccia ?? "—"}`);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "eventi_calendario" }, (p) => {
+        pushActivity(`Nuovo evento: ${(p.new as { titolo?: string }).titolo ?? "—"}`);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks_kanban" }, (p) => {
+        const task = p.new as { titolo?: string; stato?: string };
+        pushActivity(`Task "${task.titolo ?? "—"}" → ${task.stato ?? "aggiornato"}`);
+      })
+      .subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
@@ -928,6 +960,39 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
         </motion.div>
 
       </section>
+
+      {/* Activity Feed */}
+      {activityFeed.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="mt-3 overflow-hidden"
+        >
+          <div className="flex items-center gap-3 overflow-x-auto rounded-lg border border-white/8 bg-white/[0.02] px-4 py-2.5 [&::-webkit-scrollbar]:hidden">
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-widest text-orange-400/70">
+              Live
+            </span>
+            <span className="shrink-0 h-3 w-px bg-white/15" />
+            <div className="flex gap-6">
+              {activityFeed.map((item) => (
+                <motion.span
+                  key={item.id}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="shrink-0 text-xs text-white/55"
+                >
+                  <span className="mr-1.5 text-orange-300/60">●</span>
+                  {item.text}
+                  <span className="ml-2 font-mono text-[10px] text-white/25">
+                    {item.time.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </motion.span>
+              ))}
+            </div>
+          </div>
+        </motion.section>
+      )}
 
       {/* Inline AI chat embed */}
       <section className="mt-5" id="overview-ai-chat">
