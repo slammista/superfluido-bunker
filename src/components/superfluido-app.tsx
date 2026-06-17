@@ -2249,6 +2249,10 @@ function NowPlayingBar({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const waveRef = useRef<number[]>([]);
   const rafRef = useRef(0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number>(0);
+  const barsRef = useRef<HTMLDivElement[]>([]);
+  const [analyserReady, setAnalyserReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [curTime, setCurTime] = useState(0);
   const [dur, setDur] = useState(0);
@@ -2262,6 +2266,21 @@ function NowPlayingBar({
       a.pause();
       a.src = track.audio_file_url;
       a.play().catch(() => {});
+      // Setup Web Audio analyser on first play
+      if (!analyserRef.current && audioRef.current) {
+        try {
+          const ctx = new AudioContext();
+          const source = ctx.createMediaElementSource(audioRef.current);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 64;
+          source.connect(analyser);
+          analyser.connect(ctx.destination);
+          analyserRef.current = analyser;
+          setAnalyserReady(true);
+        } catch {
+          // Web Audio not supported — CSS fallback will show
+        }
+      }
       setIsPlaying(true);
       setCurTime(0);
       setDur(0);
@@ -2301,6 +2320,31 @@ function NowPlayingBar({
     rafRef.current = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafRef.current);
   }, [track.id]);
+
+  useEffect(() => {
+    if (!analyserReady || !analyserRef.current) return;
+    const analyser = analyserRef.current;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const BARS = 20;
+
+    function loop() {
+      analyser.getByteFrequencyData(data);
+      barsRef.current.forEach((bar, i) => {
+        if (!bar) return;
+        const idx = Math.floor((i / BARS) * data.length);
+        const value = data[idx] / 255;
+        const height = Math.max(0.15, value);
+        bar.style.transform = `scaleY(${height})`;
+        // Color: orange at low freq, sky at high freq
+        const hue = Math.round(30 + (i / BARS) * 170);
+        bar.style.background = `hsl(${hue}, 85%, 65%)`;
+      });
+      animFrameRef.current = requestAnimationFrame(loop);
+    }
+
+    animFrameRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animFrameRef.current);
+  }, [analyserReady]);
 
   useEffect(() => {
     function resize() {
@@ -2378,7 +2422,20 @@ function NowPlayingBar({
           <div className="flex w-full max-w-sm items-center gap-2">
             <span className="w-9 shrink-0 text-right font-mono text-[10px] tabular-nums text-white/30">{fmt(curTime)}</span>
             <div onClick={seek} className="relative h-8 flex-1 cursor-pointer overflow-hidden rounded-sm">
-              <canvas ref={canvasRef} className="h-full w-full" />
+              {analyserReady ? (
+                <div className="flex h-8 items-end gap-[2px]" aria-hidden="true">
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <div
+                      key={i}
+                      ref={(el) => { if (el) barsRef.current[i] = el; }}
+                      className="w-1 rounded-sm bg-orange-400 transition-none"
+                      style={{ height: "100%", transform: "scaleY(0.15)", transformOrigin: "bottom" }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <canvas ref={canvasRef} className="h-full w-full" />
+              )}
             </div>
             <span className="w-9 shrink-0 font-mono text-[10px] tabular-nums text-white/30">{fmt(dur)}</span>
           </div>
