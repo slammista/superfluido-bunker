@@ -124,9 +124,16 @@ export function SuperfluidoApp() {
   const [chatOpen, setChatOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [headerScrolled, setHeaderScrolled] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
   const prefersReducedMotion = useReducedMotion();
   useEffect(() => {
-    function onScroll() { setHeaderScrolled(window.scrollY > 20); }
+    function onScroll() {
+      setHeaderScrolled(window.scrollY > 20);
+      const el = document.documentElement;
+      const scrolled = el.scrollTop;
+      const total = el.scrollHeight - el.clientHeight;
+      setScrollProgress(total > 0 ? (scrolled / total) * 100 : 0);
+    }
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
@@ -371,7 +378,7 @@ export function SuperfluidoApp() {
         <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
       </div>
 
-      <header className={`sticky top-0 z-40 border-b border-white/10 bg-black/55 backdrop-blur-2xl${headerScrolled ? " scrolled" : ""}`}>
+      <header className={`relative sticky top-0 z-40 border-b border-white/10 bg-black/55 backdrop-blur-2xl${headerScrolled ? " scrolled" : ""}`}>
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <button className="flex items-center gap-3 text-left" onClick={() => setView("home")}>
             <span className="relative block h-10 w-10 overflow-hidden rounded-md border border-white/10 bg-white/5">
@@ -402,6 +409,13 @@ export function SuperfluidoApp() {
           <UserMenu user={user} onLogout={handleLogout} onPasswordReset={handleResetPassword} />
         </div>
 
+        {/* Scroll progress bar */}
+        <div className="absolute bottom-0 left-0 h-[2px] w-full bg-white/5">
+          <div
+            className="h-full bg-orange-500 transition-[width] duration-75"
+            style={{ width: `${scrollProgress}%` }}
+          />
+        </div>
       </header>
 
       {/* Toast globale */}
