@@ -205,3 +205,12 @@ header.scrolled {
 @media (prefers-reduced-motion: reduce) {
   .glitch-once { animation: none; }
 }
+
+@media (hover: hover) and (pointer: fine) {
+  html, * { cursor: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Re-enable native cursor when reduced motion is preferred */
+  html, * { cursor: auto !important; }
+}
