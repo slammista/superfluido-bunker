@@ -47,6 +47,7 @@ import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Tr
 import { SkeletonCard, SkeletonRow, SkeletonMetric } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
 import { CommandPalette } from "@/components/command-palette";
+import { CircuitHud } from "@/components/circuit-hud";
 
 type View = "home" | "inventory" | "calendar" | "projects" | "distrib" | "profile" | "vault";
 
@@ -416,6 +417,9 @@ export function SuperfluidoApp() {
             style={{ width: `${scrollProgress}%` }}
           />
         </div>
+
+        {/* Circuit HUD decoration */}
+        <CircuitHud className="absolute bottom-0 left-0 w-full h-16 opacity-60" />
       </header>
 
       {/* Toast globale */}

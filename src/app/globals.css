@@ -154,3 +154,35 @@ header.scrolled {
     background: rgba(255, 255, 255, 0.06);
   }
 }
+
+@keyframes circuit-draw {
+  from {
+    stroke-dashoffset: 600;
+    opacity: 0;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.circuit-line {
+  stroke-dasharray: 600;
+  animation: circuit-draw 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 1;
+}
+
+.circuit-dot {
+  animation: circuit-draw 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  fill: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .circuit-line, .circuit-dot {
+    animation: none;
+    stroke-dashoffset: 0;
+    opacity: 0.06;
+  }
+}
