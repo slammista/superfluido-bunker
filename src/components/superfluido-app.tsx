@@ -46,6 +46,7 @@ import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTrack
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
 import { SkeletonCard, SkeletonRow, SkeletonMetric } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
+import { CommandPalette } from "@/components/command-palette";
 
 type View = "home" | "inventory" | "calendar" | "projects" | "distrib" | "profile" | "vault";
 
@@ -121,12 +122,24 @@ export function SuperfluidoApp() {
   const [playingTrack, setPlayingTrack] = useState<Track | null>(null);
   const [playerAlbumTracks, setPlayerAlbumTracks] = useState<Track[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [headerScrolled, setHeaderScrolled] = useState(false);
   const prefersReducedMotion = useReducedMotion();
   useEffect(() => {
     function onScroll() { setHeaderScrolled(window.scrollY > 20); }
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
   }, []);
 
   function showToast(text: string, kind: "error" | "success" = "error") {
@@ -376,6 +389,16 @@ export function SuperfluidoApp() {
             ))}
           </nav>
 
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="hidden items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-white/35 transition hover:border-white/20 hover:text-white/60 xl:flex"
+            aria-label="Apri command palette"
+          >
+            <Search size={12} />
+            <span>Cerca</span>
+            <kbd className="ml-1 rounded border border-white/10 bg-white/5 px-1 py-0.5 font-mono text-[9px]">⌘K</kbd>
+          </button>
+
           <UserMenu user={user} onLogout={handleLogout} onPasswordReset={handleResetPassword} />
         </div>
 
@@ -470,6 +493,16 @@ export function SuperfluidoApp() {
         onToast={showToast}
         reload={() => loadWorkspace(user.id)}
         playerActive={!!playingTrack}
+      />
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={(view) => setView(view)}
+        onAction={(action) => {
+          // Future: trigger specific modals based on action id
+          void action;
+        }}
       />
 
       {/* Mobile bottom navigation */}
