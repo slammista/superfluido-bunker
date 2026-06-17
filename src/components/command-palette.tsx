@@ -33,11 +33,13 @@ const ACTIONS = [
   { id: "new-track",    label: "Nuova traccia",   icon: Plus,     description: "Aggiungi traccia allo studio hub", view: "projects" as View },
 ];
 
+const GROUP_HEADING_CLS = "[&_[cmdk-group-heading]]:mb-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-widest [&_[cmdk-group-heading]]:text-white/35";
+
 export function CommandPalette({ open, onClose, onNavigate, onAction }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    if (open) requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
   useEffect(() => {
@@ -78,9 +80,8 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }: CommandP
             className="fixed left-1/2 top-[18%] z-[301] w-full max-w-xl -translate-x-1/2 px-4"
           >
             <Command
+              aria-label="Command palette"
               className="overflow-hidden rounded-xl border border-white/12 bg-[#111] shadow-[0_24px_80px_rgba(0,0,0,0.7)]"
-              onKeyDown={(e) => e.key === "Escape" && onClose()}
-              onValueChange={() => {}}
             >
               {/* Search input */}
               <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3.5">
@@ -102,7 +103,7 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }: CommandP
 
                 <Command.Group
                   heading="Naviga"
-                  className="[&_[cmdk-group-heading]]:mb-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-widest [&_[cmdk-group-heading]]:text-white/35"
+                  className={GROUP_HEADING_CLS}
                 >
                   {NAV_ITEMS.map((item) => {
                     const Icon = item.icon;
@@ -125,7 +126,7 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }: CommandP
 
                 <Command.Group
                   heading="Azioni rapide"
-                  className="[&_[cmdk-group-heading]]:mb-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-widest [&_[cmdk-group-heading]]:text-white/35"
+                  className={GROUP_HEADING_CLS}
                 >
                   {ACTIONS.map((action) => {
                     const Icon = action.icon;
