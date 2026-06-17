@@ -57,6 +57,11 @@ type AppUser = {
   role: Role;
 };
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
 type AppState = {
   products: Product[];
   events: CalendarEvent[];
@@ -183,6 +188,10 @@ export function SuperfluidoApp() {
     return () => document.removeEventListener("keydown", handleKey);
   }, []);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [view]);
+
   function showToast(text: string, kind: "error" | "success" = "error") {
     setToast({ text, kind });
     setTimeout(() => setToast(null), 4000);
@@ -257,6 +266,14 @@ export function SuperfluidoApp() {
         const task = payload.new as KanbanTask;
         if (task.assegnato_a === uid && "Notification" in window && Notification.permission === "granted") {
           new Notification("Nuovo task assegnato", { body: task.titolo, icon: "/assets/logo_login.png" });
+        }
+        loadWorkspace(uid);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks_kanban" }, (payload) => {
+        const task = payload.new as KanbanTask;
+        const prev = payload.old as KanbanTask;
+        if (task.stato === "Completato" && prev.stato !== "Completato" && "Notification" in window && Notification.permission === "granted") {
+          new Notification("✅ Task completata", { body: task.titolo, icon: "/assets/logo_login.png" });
         }
         loadWorkspace(uid);
       })
@@ -418,7 +435,7 @@ export function SuperfluidoApp() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <button className="flex items-center gap-3 text-left" onClick={() => setView("home")}>
             <span className="relative block h-10 w-10 overflow-hidden rounded-md border border-white/10 bg-white/5">
-              <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain p-1" />
+              <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain p-1 animate-[spin_12s_linear_infinite]" />
             </span>
             <span>
               <span className="block text-sm font-black tracking-[0.18em] text-white glitch-once">SUPERFLUIDO</span>
@@ -530,7 +547,7 @@ export function SuperfluidoApp() {
           onClick={() => setChatOpen((o) => !o)}
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.94 }}
-          className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
+          className={`fixed right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-200 xl:right-6 ${playingTrack ? "bottom-[152px] xl:bottom-[88px]" : chatOpen ? "bottom-36 xl:bottom-6" : "bottom-20 xl:bottom-6"} ${chatOpen ? "border-orange-400/40 bg-orange-500/20 text-orange-300" : "border-white/15 bg-[#111] text-white/60 hover:border-white/25 hover:text-white"}`}
           aria-label="AI Assistant"
         >
           <Sparkles size={22} />
@@ -914,6 +931,77 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
     return () => { void supabase.removeChannel(channel); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isIOSInstallable, setIsIOSInstallable] = useState(false);
+  const [installGuide, setInstallGuide] = useState<"safari" | "chrome" | "brave" | "other" | null>(null);
+
+  const IOS_GUIDES = {
+    safari: {
+      title: "Aggiungi alla schermata Home",
+      steps: [
+        "Tocca l'icona Condividi (□↑) nella barra in basso",
+        '"Aggiungi alla schermata Home"',
+        '"Aggiungi" in alto a destra',
+      ],
+    },
+    chrome: {
+      title: "Chrome su iOS non supporta l'installazione PWA",
+      steps: [
+        "Copia l'URL dalla barra degli indirizzi",
+        "Apri Safari e incolla l'URL",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+    brave: {
+      title: "Brave su iOS non supporta l'installazione PWA",
+      steps: [
+        "Copia l'URL dalla barra degli indirizzi",
+        "Apri Safari e incolla l'URL",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+    other: {
+      title: "Installa tramite Safari",
+      steps: [
+        "Apri questa pagina in Safari",
+        'Tocca Condividi (□↑) → "Aggiungi alla schermata Home"',
+      ],
+    },
+  };
+
+  useEffect(() => {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as unknown as Record<string, unknown>).MSStream;
+    const standalone = (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    setIsIOSInstallable(ios && !standalone);
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  function detectIOSBrowser(): "safari" | "chrome" | "brave" | "other" {
+    const ua = navigator.userAgent;
+    if (/CriOS/.test(ua)) return "chrome";
+    if (/FxiOS|OPiOS|mercury/.test(ua)) return "other";
+    if (/Brave/.test(ua)) return "brave";
+    if (/Safari/.test(ua)) return "safari";
+    return "other";
+  }
+
+  function handleInstall() {
+    if (installPrompt) {
+      installPrompt.prompt();
+      installPrompt.userChoice.then(() => setInstallPrompt(null));
+      return;
+    }
+    if (isIOSInstallable) {
+      setInstallGuide(installGuide ? null : detectIOSBrowser());
+    }
+  }
+
   return (
     <>
       {/* BENTO GRID: hero (2-row tall) + 4 metrics + session bar */}
@@ -947,7 +1035,34 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
               <FileAudio size={18} />
               Studio Hub
             </button>
+            {(installPrompt || isIOSInstallable) && (
+              <button onClick={handleInstall} className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white transition hover:border-white/25">
+                <Download size={18} />
+                Installa App
+              </button>
+            )}
           </div>
+          {installGuide && (() => {
+            const guide = IOS_GUIDES[installGuide];
+            return (
+              <div className="mt-4 rounded-md border border-white/12 bg-white/[0.04] p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm font-bold text-white">{guide.title}</p>
+                  <button onClick={() => setInstallGuide(null)} className="text-white/40 transition hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+                <ol className="space-y-2">
+                  {guide.steps.map((step, i) => (
+                    <li key={i} className="flex gap-2.5 text-sm text-white/70">
+                      <span className="shrink-0 font-mono text-orange-400">{i + 1}.</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            );
+          })()}
         </motion.div>
 
         {/* 4 Metrics — fill the 2×2 right area on desktop, 2×2 grid on mobile */}
@@ -1261,42 +1376,72 @@ function markdownToHtml(md: string): string {
 
 // ── PrintPreviewModal ─────────────────────────────────────────────────────────
 
-function PrintPreviewModal({ content, onClose }: { content: string; onClose: () => void }) {
+function PrintPreviewModal({ content, onClose, onToast }: { content: string; onClose: () => void; onToast?: (text: string, kind?: "error" | "success") => void }) {
   const html = markdownToHtml(content);
+  const savedRef = useRef(false);
 
   useEffect(() => {
-    const style = document.createElement("style");
-    style.id = "sf-print-style";
-    style.textContent = `
-      .sf-prose { font-family: Georgia, "Times New Roman", serif; color: #111; line-height: 1.8; }
-      .sf-prose h1 { font-size: 1.9rem; font-weight: 900; font-family: Arial, sans-serif; border-bottom: 3px solid #111; padding-bottom: 0.4em; margin: 0 0 1em; }
-      .sf-prose h2 { font-size: 1.2rem; font-weight: 700; font-family: Arial, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; margin: 2em 0 0.7em; color: #333; }
-      .sf-prose h3 { font-size: 1rem; font-weight: 700; font-family: Arial, sans-serif; margin: 1.5em 0 0.5em; }
-      .sf-prose p  { margin: 0.7em 0; }
-      .sf-prose ul { padding-left: 1.6em; margin: 0.7em 0; }
-      .sf-prose li { margin: 0.35em 0; }
-      .sf-prose strong { font-weight: 700; }
-      .sf-prose em { font-style: italic; }
-      .sf-prose code { background: #f0f0f0; padding: 0.15em 0.4em; border-radius: 3px; font-family: monospace; font-size: 0.88em; }
-      @media print {
-        body > *:not(#sf-print-modal) { display: none !important; }
-        #sf-print-modal { position: static !important; overflow: visible !important; background: white !important; }
-        #sf-print-controls { display: none !important; }
+    if (!onToast || savedRef.current) return;
+    savedRef.current = true;
+    const today = new Date();
+    const [year, month, day] = today.toISOString().split("T")[0].split("-");
+    const italianDate = `${day}/${month}/${year}`;
+    const dateTimeStr = today.toISOString().replace("T", "-").slice(0, 16).replace(/:/g, "");
+    const filePath = `press-kit/press-kit-${dateTimeStr}.pdf`;
+    const supabase = getSupabase();
+    (async () => {
+      try {
+        const res = await fetch("/api/pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, title: "MEDIA PRESS KIT" }),
+        });
+        if (!res.ok) throw new Error("pdf-gen-failed");
+        const pdfBlob = await res.blob();
+        const { error: storageErr } = await supabase.storage.from("vault").upload(filePath, pdfBlob, { contentType: "application/pdf", upsert: true });
+        if (storageErr) { onToast(`Errore upload vault: ${storageErr.message}`); return; }
+        const { data: urlData } = supabase.storage.from("vault").getPublicUrl(filePath);
+        const { error: dbErr } = await supabase.from("vault_documenti").insert({ nome_file: `Press Kit ${italianDate}`, cartella: "Press", file_url: urlData.publicUrl });
+        if (dbErr) { onToast(`Errore vault: ${dbErr.message}`); return; }
+        onToast("Press kit salvato nel Vault → cartella Press.", "success");
+      } catch {
+        onToast("Errore generazione PDF vault.", "error");
       }
-    `;
-    document.head.appendChild(style);
-    return () => document.getElementById("sf-print-style")?.remove();
-  }, []);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleDownload() {
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, title: "MEDIA PRESS KIT" }),
+      });
+      if (!res.ok) throw new Error("pdf-gen-failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `press-kit-superfluido-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      window.print();
+    }
+  }
 
   return (
-    <div id="sf-print-modal" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
-      <div className="mx-auto max-w-2xl px-8 py-8">
-        <div id="sf-print-controls" className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5">
+    <div id="press-kit-print-root" className="fixed inset-0 z-[60] overflow-auto bg-white text-black">
+      <div className="mx-auto max-w-2xl px-6 py-8 sm:px-8">
+        <div className="mb-8 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-5 print:hidden">
           <button
-            onClick={() => window.print()}
-            className="rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
+            onClick={handleDownload}
+            className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-2.5 text-sm font-bold text-white hover:bg-gray-800"
           >
-            Stampa / Salva PDF
+            <Download size={15} />
+            Scarica PDF
           </button>
           <button
             onClick={onClose}
@@ -1304,49 +1449,58 @@ function PrintPreviewModal({ content, onClose }: { content: string; onClose: () 
           >
             Chiudi
           </button>
-          <span className="text-xs text-gray-400">Su mobile: Stampa → Salva come PDF</span>
+          <span className="text-xs text-gray-400">iOS: tap Scarica PDF → Condividi → Stampa → Salva come PDF</span>
         </div>
-        <div className="sf-prose" dangerouslySetInnerHTML={{ __html: html }} />
+        {/* Branded preview */}
+        <div style={{ borderTop: "5px solid #f97316", marginBottom: "0" }} />
+        <div style={{ padding: "32px 0 8px", borderBottom: "1px solid #e5e5e5", marginBottom: "32px" }}>
+          <div style={{ fontSize: "9px", fontFamily: "Helvetica,Arial,sans-serif", letterSpacing: ".4em", textTransform: "uppercase" as const, color: "#f97316", fontWeight: 700, marginBottom: "10px" }}>
+            SUPERFLUIDO · BUNKER OPERATING SYSTEM
+          </div>
+          <div style={{ fontSize: "40px", fontWeight: 900, lineHeight: "1", letterSpacing: "-1.5px", fontFamily: "Helvetica,Arial,sans-serif", color: "#000" }}>
+            MEDIA PRESS KIT
+          </div>
+          <div style={{ marginTop: "12px", fontSize: "11px", color: "#999", fontFamily: "Helvetica,Arial,sans-serif" }}>
+            {new Date().toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })}
+          </div>
+        </div>
+        <div style={{ fontFamily: "Georgia,'Times New Roman',serif", color: "#111", lineHeight: "1.85" }}
+          dangerouslySetInnerHTML={{ __html: html.replace(/<h1>/g, '<h1 style="font-size:20px;font-weight:900;font-family:Helvetica,Arial,sans-serif;border-left:4px solid #f97316;padding-left:14px;margin:32px 0 12px;color:#000">').replace(/<h2>/g, '<h2 style="font-size:11px;font-weight:700;font-family:Helvetica,Arial,sans-serif;text-transform:uppercase;letter-spacing:.14em;color:#f97316;margin:24px 0 8px">').replace(/<h3>/g, '<h3 style="font-size:10px;font-weight:700;font-family:Helvetica,Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#888;margin:18px 0 6px">').replace(/<p>/g, '<p style="font-size:14px;line-height:1.85;color:#222;margin-bottom:12px">').replace(/<li>/g, '<li style="font-size:14px;line-height:1.75;margin-bottom:5px">') }}
+        />
       </div>
     </div>
   );
 }
+
+type PendingIntentClient = { type: string; entities: Record<string, string | null> } | null;
 
 async function sendToAI(
   messages: ChatMessage[],
   context: ReturnType<typeof buildAIContext>,
   userId: string,
   onChunk: (chunk: string) => void,
-): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; provider?: string }> {
+  pendingIntent?: PendingIntentClient,
+): Promise<{ actionPerformed: boolean; actionMessage?: string; printable?: boolean; pendingIntent?: PendingIntentClient }> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context, userId }),
+    body: JSON.stringify({ messages, context, userId, pendingIntent }),
   });
   if (!res.ok) { const data = await res.json() as { error?: string }; throw new Error(data.error ?? "Errore AI"); }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let meta: { actionPerformed: boolean; actionMessage: string; printable: boolean; provider: string } =
-    { actionPerformed: false, actionMessage: "", printable: false, provider: "AI" };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const parsed = JSON.parse(line.slice(6)) as { type: string; text?: string; actionPerformed?: boolean; actionMessage?: string; printable?: boolean; provider?: string };
-        if (parsed.type === "chunk") onChunk(parsed.text ?? "");
-        else if (parsed.type === "done") meta = { actionPerformed: parsed.actionPerformed ?? false, actionMessage: parsed.actionMessage ?? "", printable: parsed.printable ?? false, provider: parsed.provider ?? "AI" };
-      } catch { /* ignore */ }
-    }
-  }
-  return meta;
+  const data = await res.json() as {
+    text?: string;
+    actionPerformed?: boolean;
+    actionMessage?: string;
+    printable?: boolean;
+    pendingIntent?: PendingIntentClient;
+  };
+  if (data.text) onChunk(data.text);
+  return {
+    actionPerformed: data.actionPerformed ?? false,
+    actionMessage: data.actionMessage,
+    printable: data.printable ?? false,
+    pendingIntent: data.pendingIntent ?? null,
+  };
 }
 
 // ── OverviewAIWidget (embedded ChatGPT-style) ────────────────────────────────
@@ -1367,6 +1521,7 @@ function OverviewAIWidget({
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("AI");
+  const [pendingIntent, setPendingIntent] = useState<PendingIntentClient>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1399,13 +1554,14 @@ function OverviewAIWidget({
             return updated;
           });
         },
+        pendingIntent,
       );
+      setPendingIntent(meta.pendingIntent ?? null);
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
-      if (meta.provider) setAiProvider(meta.provider);
       if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
@@ -1435,7 +1591,7 @@ function OverviewAIWidget({
         <p className="font-black text-white">AI Assistant</p>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(null); }}
             className="ml-2 text-[11px] text-white/30 transition hover:text-white/60"
           >
             Nuova chat
@@ -1485,7 +1641,9 @@ function OverviewAIWidget({
                     : "rounded-bl-sm bg-white/[0.06] text-white/85"
                 }`}
               >
-                {msg.content}
+                {msg.role === "assistant"
+                  ? <span dangerouslySetInnerHTML={{ __html: renderMsgMarkdown(msg.content) }} />
+                  : msg.content}
               </div>
               {msg.printable && (
                 <button
@@ -1542,7 +1700,7 @@ function OverviewAIWidget({
       </div>
 
       {printContent !== null && (
-        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} onToast={onToast} />
       )}
     </div>
   );
@@ -1572,6 +1730,7 @@ function AIChatPanel({
   const [aiLoading, setAiLoading] = useState(false);
   const [printContent, setPrintContent] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("AI");
+  const [pendingIntent, setPendingIntent] = useState<PendingIntentClient>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1604,13 +1763,14 @@ function AIChatPanel({
             return updated;
           });
         },
+        pendingIntent,
       );
+      setPendingIntent(meta.pendingIntent ?? null);
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = { ...updated[updated.length - 1], printable: meta.printable };
         return updated;
       });
-      if (meta.provider) setAiProvider(meta.provider);
       if (meta.printable) setPrintContent(streamedContent);
       if (meta.actionPerformed) {
         await reload();
@@ -1645,7 +1805,7 @@ function AIChatPanel({
         </span>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => { setMessages([]); setPendingIntent(null); }}
             className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] font-semibold text-white/40 transition hover:border-orange-500/40 hover:text-orange-300"
           >
             <Plus size={11} />
@@ -1687,7 +1847,9 @@ function AIChatPanel({
                   : "bg-white/[0.06] text-white/85"
               }`}
             >
-              {msg.content}
+              {msg.role === "assistant"
+                ? <span dangerouslySetInnerHTML={{ __html: renderMsgMarkdown(msg.content) }} />
+                : msg.content}
             </div>
             {msg.printable && (
               <button
@@ -1740,7 +1902,7 @@ function AIChatPanel({
       </div>
 
       {printContent !== null && (
-        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} />
+        <PrintPreviewModal content={printContent} onClose={() => setPrintContent(null)} onToast={onToast} />
       )}
     </div>
   );
@@ -1808,7 +1970,26 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
   const [saving, setSaving] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [updatingProduct, setUpdatingProduct] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [inventoryView, setInventoryView] = useState<"list" | "analytics">("list");
+  const addFormRef = useRef<HTMLDivElement>(null);
   const filtered = products.filter((product) => `${product.name} ${product.category}`.toLowerCase().includes(query.toLowerCase()));
+
+  const analyticsData = useMemo(() => {
+    const totalValue = products.reduce((sum, p) => {
+      const stock = (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
+      return sum + stock * Number(p.base_price_sell ?? 0);
+    }, 0);
+    const byProduct = products
+      .map((p) => ({ name: p.name, stock: (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0) }))
+      .sort((a, b) => b.stock - a.stock)
+      .slice(0, 8);
+    const maxStock = Math.max(...byProduct.map((p) => p.stock), 1);
+    const byCategory: Record<string, number> = {};
+    for (const p of products) { const cat = p.category ?? "Altro"; byCategory[cat] = (byCategory[cat] ?? 0) + 1; }
+    const lowStock = products.filter((p) => (p.product_variants ?? []).some((v) => Number(v.stock_quantity ?? 0) <= 3));
+    return { totalValue, byProduct, maxStock, byCategory, lowStock };
+  }, [products]);
 
   async function addProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1875,6 +2056,24 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
     <>
       <ModuleHeader title="Magazzino" text="Inventario merch, varianti e alert stock con lettura diretta dalle tabelle products e product_variants." icon={Warehouse} />
 
+      {/* Tab Lista / Analytics */}
+      <div className="mb-5 flex items-center gap-2">
+        <button
+          onClick={() => setInventoryView("list")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${inventoryView === "list" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <List size={14} />
+          Lista
+        </button>
+        <button
+          onClick={() => setInventoryView("analytics")}
+          className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${inventoryView === "analytics" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
+        >
+          <Sparkles size={14} />
+          Analytics
+        </button>
+      </div>
+
       {/* Modal modifica prodotto */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4" onClick={() => setEditingProduct(null)}>
@@ -1913,8 +2112,9 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-        <div className="glass rounded-md p-5">
+      {inventoryView === "list" && (
+      <div className="grid gap-5 min-w-0 lg:grid-cols-[1fr_360px]">
+        <div className="glass rounded-md p-5 min-w-0 overflow-hidden">
           <div className="mb-5 flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
             <Search size={18} className="text-white/40" />
             <input className="w-full bg-transparent text-sm text-white outline-none" placeholder="Cerca prodotto, categoria o variante" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -2009,17 +2209,110 @@ function Inventory({ products, user, reload, onToast }: { products: Product[]; u
           </div>
         </div>
 
-        <form onSubmit={addProduct} className="glass rounded-md p-5">
-          <p className="text-lg font-black text-white">Nuovo prodotto</p>
-          <p className="mt-1 text-sm text-white/50">Creazione rapida su Supabase per merch e supporti fisici.</p>
-          <Input name="name" label="Nome" required />
-          <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
-          <Input name="price" label="Prezzo vendita" type="number" step="0.01" />
-          <Input name="stock" label="Stock iniziale" type="number" defaultValue="0" />
-          <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
-          <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
-        </form>
+        <div ref={addFormRef} className="glass rounded-md">
+          <button
+            type="button"
+            onClick={() => {
+              setShowAddForm((v) => {
+                if (!v) setTimeout(() => addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+                return !v;
+              });
+            }}
+            className="flex w-full items-center justify-between px-5 py-4 lg:hidden"
+          >
+            <span className="text-sm font-black text-white">+ Nuovo prodotto</span>
+            <ChevronRight size={16} className={`text-white/40 transition-transform duration-200 ${showAddForm ? "rotate-90" : ""}`} />
+          </button>
+          <form
+            onSubmit={addProduct}
+            className={`p-5 ${showAddForm ? "block" : "hidden"} lg:block`}
+          >
+            <p className="hidden text-lg font-black text-white lg:block">Nuovo prodotto</p>
+            <p className="mt-1 hidden text-sm text-white/50 lg:block">Creazione rapida su Supabase per merch e supporti fisici.</p>
+            <Input name="name" label="Nome" required />
+            <Select name="category" label="Categoria" options={PRODUCT_CATEGORIES} />
+            <Input name="price" label="Prezzo vendita" type="text" inputMode="decimal" />
+            <Input name="stock" label="Stock iniziale" type="text" inputMode="numeric" defaultValue="0" />
+            <ActionButton icon={Plus} text="Aggiungi" loading={saving} />
+            <p className="mt-4 text-xs text-white/35">Operatore: {user.email}</p>
+          </form>
+        </div>
       </div>
+      )}
+
+      {inventoryView === "analytics" && (
+        <div className="space-y-5">
+          {/* Valore totale */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="glass rounded-md border border-orange-400/25 bg-orange-500/12 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-200/65">Valore totale stock</p>
+              <p className="mt-3 font-mono text-3xl font-black text-orange-200">{formatEuro(analyticsData.totalValue)}</p>
+            </div>
+            <div className="glass rounded-md border border-white/10 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">Prodotti totali</p>
+              <p className="mt-3 font-mono text-3xl font-black text-white">{products.length}</p>
+            </div>
+            <div className="glass rounded-md border border-red-400/25 bg-red-500/10 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200/65">Scorte basse (≤3)</p>
+              <p className="mt-3 font-mono text-3xl font-black text-red-300">{analyticsData.lowStock.length}</p>
+            </div>
+          </div>
+
+          {/* Stock per prodotto */}
+          <div className="glass rounded-md p-5">
+            <p className="mb-5 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Stock per prodotto</p>
+            <div className="space-y-3">
+              {analyticsData.byProduct.map((p) => (
+                <div key={p.name} className="flex items-center gap-3">
+                  <p className="w-36 shrink-0 truncate text-sm text-white/70">{p.name}</p>
+                  <div className="flex-1 rounded-full bg-white/[0.06]" style={{ height: 8 }}>
+                    <div
+                      className="rounded-full bg-orange-500 transition-all"
+                      style={{ height: 8, width: `${Math.round((p.stock / analyticsData.maxStock) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="w-8 shrink-0 text-right font-mono text-sm font-black text-white">{p.stock}</p>
+                </div>
+              ))}
+              {analyticsData.byProduct.length === 0 && <p className="text-sm text-white/35">Nessun prodotto.</p>}
+            </div>
+          </div>
+
+          {/* Distribuzione per categoria + Alert scorte basse */}
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="glass rounded-md p-5">
+              <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Per categoria</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(analyticsData.byCategory).map(([cat, count]) => {
+                  const pct = products.length > 0 ? Math.round((count / products.length) * 100) : 0;
+                  return (
+                    <div key={cat} className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                      <span className="text-sm font-bold text-white">{cat}</span>
+                      <span className="font-mono text-xs text-orange-300">{pct}%</span>
+                    </div>
+                  );
+                })}
+                {Object.keys(analyticsData.byCategory).length === 0 && <p className="text-sm text-white/35">Nessun dato.</p>}
+              </div>
+            </div>
+            <div className="glass rounded-md p-5">
+              <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-white/45">Alert scorte basse</p>
+              <div className="space-y-2">
+                {analyticsData.lowStock.length === 0 && <p className="text-sm text-white/35">Nessun prodotto sotto soglia.</p>}
+                {analyticsData.lowStock.map((p) => {
+                  const stock = (p.product_variants ?? []).reduce((s, v) => s + Number(v.stock_quantity ?? 0), 0);
+                  return (
+                    <div key={p.id} className="flex items-center justify-between rounded-md border border-red-400/20 bg-red-500/[0.06] px-3 py-2">
+                      <p className="text-sm text-white/80">{p.name}</p>
+                      <span className="font-mono text-sm font-black text-red-300">{stock} rimasti</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -2031,6 +2324,14 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
   const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth()); // 0-indexed
   const [popoverEvent, setPopoverEvent] = useState<CalendarEvent | null>(null);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "denied"
+  );
+
+  function requestNotifPerm() {
+    if (!("Notification" in window)) return;
+    void Notification.requestPermission().then((p) => setNotifPerm(p));
+  }
 
   const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
   const GIORNI_HEADER = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
@@ -2152,7 +2453,7 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
       />
 
       {/* Toggle Mensile / Lista / Task Board */}
-      <div className="mb-5 flex items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setCalView("month")}
           className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition ${calView === "month" ? "bg-orange-500 text-black" : "border border-white/10 bg-white/[0.04] text-white/60 hover:text-white"}`}
@@ -2174,6 +2475,14 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
           <ClipboardList size={14} />
           Task Board
         </button>
+        {calView === "kanban" && typeof window !== "undefined" && "Notification" in window && notifPerm !== "denied" && (
+          <button
+            onClick={notifPerm === "default" ? requestNotifPerm : undefined}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition ${notifPerm === "granted" ? "cursor-default bg-emerald-500/15 text-emerald-300" : "cursor-pointer bg-orange-500/15 text-orange-300 hover:bg-orange-500/25"}`}
+          >
+            🔔 {notifPerm === "granted" ? "Notifiche attive" : "Abilita notifiche"}
+          </button>
+        )}
       </div>
 
       {calView === "kanban" && (
@@ -2283,7 +2592,23 @@ function CalendarModule({ events, tasks, user, reload, onToast }: { events: Cale
                     <h3 className="mt-2 text-xl font-black text-white">{event.titolo}</h3>
                     <p className="mt-2 font-mono text-sm text-orange-200">{formatDate(event.data_evento)}</p>
                     <p className="mt-1 text-sm text-white/55">{event.luogo || "Location non definita"}</p>
-                    <div className="mt-4 flex justify-end">
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => openGoogleCalendar(event)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
+                        title="Aggiungi a Google Calendar"
+                      >
+                        <CalendarDays size={13} />
+                        + Google Cal
+                      </button>
+                      <button
+                        onClick={() => downloadIcs(event)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-xs text-white/50 transition hover:border-orange-400/30 hover:text-orange-400"
+                        title="Aggiungi a Apple Calendar / Calendario"
+                      >
+                        <CalendarDays size={13} />
+                        + Apple Cal
+                      </button>
                       <button
                         onClick={() => deleteEvent(event.id)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-400/25 text-red-200 hover:bg-red-500/10"
@@ -3039,7 +3364,7 @@ function Projects({
           <p className="text-sm text-white/40">Nessun progetto in lavorazione. Creane uno o sposta una release in "In Lavorazione" da Distrib.</p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
           {wipAlbums.map((album) => {
             const count = tracks.filter((t) => t.album_id === album.id).length;
             return (
@@ -3048,21 +3373,21 @@ function Projects({
                 onClick={() => setSelectedAlbum(album)}
                 className="glass group overflow-hidden rounded-md text-left transition hover:border-orange-400/30"
               >
-                <div className={`relative h-40 bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
+                <div className={`relative aspect-square bg-gradient-to-br ${albumGradient(album.id)} flex items-center justify-center`}>
                   {album.cover_image_url ? (
                     <Image src={album.cover_image_url} alt={album.nome_album} fill className="object-cover" unoptimized />
                   ) : (
-                    <Music size={40} className="text-white/20" />
+                    <Music size={32} className="text-white/20" />
                   )}
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
-                    <span className="rounded-full bg-black/60 p-3">
-                      <Play size={20} className="text-white" fill="white" />
+                    <span className="rounded-full bg-black/60 p-2.5">
+                      <Play size={16} className="text-white" fill="white" />
                     </span>
                   </div>
                 </div>
-                <div className="p-4">
-                  <p className="font-black text-white">{album.nome_album}</p>
-                  <p className="mt-1 text-xs text-white/45">{count} {count === 1 ? "traccia" : "tracce"}</p>
+                <div className="p-3">
+                  <p className="truncate text-sm font-bold text-white">{album.nome_album}</p>
+                  <p className="mt-0.5 text-xs text-white/45">{count} {count === 1 ? "traccia" : "tracce"}</p>
                 </div>
               </button>
             );
@@ -3413,33 +3738,30 @@ function Distrib({
             {current && current.list.length === 0 ? (
               <p className="py-16 text-center text-sm text-white/30">Nessuna release in questa sezione.</p>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                 {(current ?? SECTIONS[0])?.list.map((album) => {
                   const cover = album.cover_image_url;
                   const isWip = current?.key === "wip";
                   return (
                     <article key={album.id} className="glass group overflow-hidden rounded-md">
-                      <div className="relative h-44 w-full bg-white/[0.04]">
+                      <div className="relative aspect-square w-full bg-white/[0.04]">
                         {cover ? (
                           <Image src={cover} alt={album.nome_album} fill className="object-cover" unoptimized />
                         ) : (
                           <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${albumGradient(album.id)}`}>
-                            <Music size={40} className="text-white/30" />
+                            <Music size={32} className="text-white/30" />
                           </div>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                        <div className="absolute bottom-3 left-3 right-3">
-                          <p className="font-black leading-tight text-white">{album.nome_album}</p>
-                          {album.release_date && (
-                            <p className="mt-0.5 text-xs text-white/60">
-                              {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "long", day: "numeric" })}
-                            </p>
-                          )}
-                        </div>
                       </div>
 
-                      <div className="p-4">
-                        <div className="flex flex-wrap gap-2">
+                      <div className="p-3">
+                        <p className="truncate text-sm font-bold leading-tight text-white">{album.nome_album}</p>
+                        {album.release_date && (
+                          <p className="mt-0.5 text-xs text-white/50 truncate">
+                            {new Date(album.release_date).toLocaleDateString("it-IT", { year: "numeric", month: "short" })}
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {album.link_spotify && (
                             <a href={album.link_spotify} target="_blank" rel="noreferrer"
                               className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20">
@@ -3503,6 +3825,33 @@ function Distrib({
   );
 }
 
+// Shared branded HTML wrapper — used by both PrintPreviewModal and PressKit
+function buildPressKitHtmlStyled(htmlBody: string, italianDate: string): string {
+  const css = `
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}
+    .accent-bar{height:6px;background:#f97316}
+    .page{max-width:780px;margin:0 auto;padding:48px 60px 60px}
+    .hdr{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:28px;border-bottom:1px solid #e5e5e5;margin-bottom:40px}
+    .brand-tag{font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.38em;text-transform:uppercase;color:#f97316;font-weight:700;margin-bottom:14px}
+    .pk-title{font-size:52px;font-weight:900;line-height:.92;letter-spacing:-2px;font-family:'Helvetica Neue',Arial,sans-serif;color:#000}
+    .hdr-meta{text-align:right;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;line-height:1.8}
+    .content h1{font-size:20px;font-weight:900;font-family:'Helvetica Neue',Arial,sans-serif;border-left:4px solid #f97316;padding-left:14px;margin:38px 0 12px;color:#000;line-height:1.2}
+    .content h2{font-size:11px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.15em;color:#f97316;margin:26px 0 8px}
+    .content h3{font-size:10px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#888;margin:20px 0 6px}
+    .content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}
+    .content ul{margin:4px 0 16px 0;list-style:none;padding:0}
+    .content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:6px;padding-left:18px;position:relative}
+    .content li::before{content:"—";position:absolute;left:0;color:#f97316;font-weight:700}
+    .content hr{border:none;border-top:1px solid #e5e5e5;margin:28px 0}
+    .content strong{font-weight:700;color:#000}
+    .content em{font-style:italic}
+    .footer{margin-top:56px;padding-top:16px;border-top:2px solid #f97316;font-size:9px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.1em}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:36px 48px}}
+  `;
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SUPERFLUIDO — Media Press Kit ${italianDate}</title><style>${css}</style></head><body><div class="accent-bar"></div><div class="page"><div class="hdr"><div><div class="brand-tag">SUPERFLUIDO · Bunker Operating System</div><div class="pk-title">MEDIA<br>PRESS KIT</div></div><div class="hdr-meta"><strong>Roma, ${italianDate}</strong><br>@superfluido_official</div></div><div class="content">${htmlBody}</div><div class="footer"><span>SUPERFLUIDO — Hip-Hop Indipendente · Roma 2021</span><span>Generato il ${italianDate}</span></div></div></body></html>`;
+}
+
 // FIX 5: PressKit con download .txt e salvataggio nel vault
 function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; onToast: (text: string, kind?: "error" | "success") => void }) {
   const [prompt, setPrompt] = useState("Genera un press kit sintetico per la prossima release, includendo bio, pitch editoriale, punti forza e caption social.");
@@ -3540,21 +3889,12 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
   }
 
   function buildPressKitHtml(content: string, italianDate: string): string {
-    // Markdown → HTML converter
-    function esc(s: string) {
-      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function inline(s: string) {
-      return esc(s)
-        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*(.+?)\*/g, "<em>$1</em>");
-    }
+    function esc(s: string) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function inline(s: string) { return esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>"); }
     const lines = content.split("\n");
     const chunks: string[] = [];
     const listBuf: string[] = [];
-    function flushList() {
-      if (listBuf.length) { chunks.push("<ul>" + listBuf.join("") + "</ul>"); listBuf.length = 0; }
-    }
+    function flushList() { if (listBuf.length) { chunks.push("<ul>" + listBuf.join("") + "</ul>"); listBuf.length = 0; } }
     for (const line of lines) {
       const t = line.trim();
       if (t.startsWith("### ")) { flushList(); chunks.push(`<h3>${inline(t.slice(4))}</h3>`); }
@@ -3567,19 +3907,23 @@ function PressKit({ state, user, onToast }: { state: AppState; user: AppUser; on
       else { flushList(); chunks.push(`<p>${inline(t)}</p>`); }
     }
     flushList();
-    const body = chunks.join("\n");
-    const css = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}.page{max-width:760px;margin:0 auto;padding:60px 50px}.hdr{border-bottom:3px solid #f97316;padding-bottom:24px;margin-bottom:40px}.brand{font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#f97316;margin-bottom:8px;font-weight:700}.pk-title{font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;font-family:'Helvetica Neue',Arial,sans-serif}.dt{font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:#888;margin-top:10px}.content h1{font-size:26px;font-weight:900;margin:32px 0 10px;font-family:'Helvetica Neue',Arial,sans-serif}.content h2{font-size:20px;font-weight:800;margin:28px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif}.content h3{font-size:12px;font-weight:700;margin:26px 0 8px;font-family:'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;color:#f97316}.content p{font-size:14px;line-height:1.85;color:#222;margin-bottom:12px}.content ul{margin:4px 0 16px 20px}.content li{font-size:14px;line-height:1.75;color:#222;margin-bottom:5px}.content hr{border:none;border-top:1px solid #e5e5e5;margin:20px 0}.content strong{font-weight:700;color:#000}.content em{font-style:italic}.footer{margin-top:50px;padding-top:18px;border-top:1px solid #e5e5e5;font-size:11px;font-family:'Helvetica Neue',Arial,sans-serif;color:#bbb;display:flex;justify-content:space-between}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:40px}}`;
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Press Kit SUPERFLUIDO — ${italianDate}</title><style>${css}</style></head><body><div class="page"><div class="hdr"><div class="brand">SUPERFLUIDO · Press Kit</div><div class="pk-title">Media Press Kit</div><div class="dt">Generato il ${esc(italianDate)}</div></div><div class="content">${body}</div><div class="footer"><span>SUPERFLUIDO Bunker Operating System</span><span>${esc(italianDate)}</span></div></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+    return buildPressKitHtmlStyled(chunks.join("\n"), italianDate);
   }
 
   function downloadPdf() {
     const today = new Date();
     const [year, month, day] = today.toISOString().split("T")[0].split("-");
     const italianDate = `${day}/${month}/${year}`;
-    const win = window.open("", "_blank");
-    if (!win) { onToast("Popup bloccato. Abilita i popup per generare il PDF."); return; }
-    win.document.write(buildPressKitHtml(answer, italianDate));
-    win.document.close();
+    const html = buildPressKitHtml(answer, italianDate);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `press-kit-superfluido-${today.toISOString().split("T")[0]}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function saveToVault() {
@@ -4466,7 +4810,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label: str
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <input className={`field mt-2 rounded-md px-3 py-2.5 text-sm ${className ?? ""}`} {...inputProps} />
+      <input className={`field mt-2 rounded-md px-3 py-2.5 text-base sm:text-sm ${className ?? ""}`} {...inputProps} />
     </label>
   );
 }
@@ -4476,7 +4820,7 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { l
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <textarea className={`field mt-2 min-h-28 rounded-md px-3 py-2.5 text-sm ${className ?? ""}`} {...textareaProps} />
+      <textarea className={`field mt-2 min-h-28 rounded-md px-3 py-2.5 text-base sm:text-sm ${className ?? ""}`} {...textareaProps} />
     </label>
   );
 }
@@ -4485,7 +4829,7 @@ function Select({ label, name, options, defaultValue }: { label: string; name: s
   return (
     <label className="mt-4 block">
       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      <select name={name} defaultValue={defaultValue} className="field mt-2 rounded-md px-3 py-2.5 text-sm">
+      <select name={name} defaultValue={defaultValue} className="field mt-2 rounded-md px-3 py-2.5 text-base sm:text-sm">
         {options.map((option) => (
           <option key={option} value={option} className="bg-neutral-950">
             {option}
@@ -4505,6 +4849,15 @@ function ActionButton({ icon: Icon, text, loading = false }: { icon: typeof Plus
   );
 }
 
+// ── Markdown renderer for AI chat bubbles ────────────────────
+function renderMsgMarkdown(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
 // ── Utility ──────────────────────────────────────────────────
 
 function formatEuro(value: number | null) {
@@ -4518,4 +4871,47 @@ function formatDate(value: string) {
     timeStyle: "short",
     timeZone: "Europe/Rome",
   }).format(new Date(value));
+}
+
+function downloadIcs(event: CalendarEvent) {
+  const dt = new Date(event.data_evento);
+  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const lines = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//SUPERFLUIDO Bunker//EN",
+    "BEGIN:VEVENT",
+    `DTSTART:${fmt(dt)}`, `DTEND:${fmt(dtEnd)}`,
+    `SUMMARY:${(event.titolo ?? "Evento").replace(/[\\;,]/g, (c) => "\\" + c)}`,
+    event.luogo ? `LOCATION:${event.luogo.replace(/[\\;,]/g, (c) => "\\" + c)}` : "",
+    `UID:${event.id}@superfluido-bunker`,
+    "END:VEVENT", "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+  const blob = new Blob([lines], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(event.titolo ?? "evento").replace(/\s+/g, "-")}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function openGoogleCalendar(event: CalendarEvent) {
+  const dt = new Date(event.data_evento);
+  const dtEnd = new Date(dt.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: event.titolo ?? "",
+    dates: `${fmt(dt)}/${fmt(dtEnd)}`,
+    ...(event.luogo ? { location: event.luogo } : {}),
+    ...(event.tipo_evento ? { details: event.tipo_evento } : {}),
+  });
+  const webUrl = `https://calendar.google.com/calendar/render?${params.toString()}`;
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    // Intent URL opens Google Calendar app directly on Android, falls back to browser
+    window.location.href = `intent://calendar.google.com/calendar/render?${params.toString()}#Intent;scheme=https;package=com.google.android.calendar;S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
+  } else {
+    window.open(webUrl, "_blank");
+  }
 }
