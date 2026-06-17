@@ -186,3 +186,22 @@ header.scrolled {
     opacity: 0.06;
   }
 }
+
+@keyframes glitch-in {
+  0%   { clip-path: inset(0 0 100% 0); transform: translate(0); }
+  10%  { clip-path: inset(20% 0 55% 0); transform: translate(-2px, 1px); }
+  20%  { clip-path: inset(45% 0 30% 0); transform: translate(2px, -1px); }
+  30%  { clip-path: inset(65% 0 10% 0); transform: translate(-1px, 0); }
+  40%  { clip-path: inset(80% 0 5% 0);  transform: translate(1px, 1px); }
+  50%  { clip-path: inset(90% 0 0 0);   transform: translate(0); }
+  60%  { clip-path: inset(0 0 0 0);     transform: translate(0); }
+  100% { clip-path: inset(0 0 0 0);     transform: translate(0); }
+}
+
+.glitch-once {
+  animation: glitch-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glitch-once { animation: none; }
+}

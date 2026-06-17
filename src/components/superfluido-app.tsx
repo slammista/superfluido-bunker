@@ -386,7 +386,7 @@ export function SuperfluidoApp() {
               <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain p-1" />
             </span>
             <span>
-              <span className="block text-sm font-black tracking-[0.18em] text-white">SUPERFLUIDO</span>
+              <span className="block text-sm font-black tracking-[0.18em] text-white glitch-once">SUPERFLUIDO</span>
               <span className="block text-xs text-white/48">Bunker Operating System</span>
             </span>
           </button>
