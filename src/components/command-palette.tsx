@@ -44,7 +44,11 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }: CommandP
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
     }
     if (open) document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);

@@ -280,31 +280,33 @@ export function SuperfluidoApp() {
     setDataLoading(true);
     const supabase = getSupabase();
 
-    const [products, events, albums, tracks, profiles, vault, folders, tasks] = await Promise.all([
-      supabase.from("products").select("*, product_variants(*)"),
-      supabase.from("eventi_calendario").select("*").order("data_evento"),
-      supabase.from("album_progetti").select("*").order("created_at", { ascending: false }),
-      supabase.from("tracce_audio").select("*, album_progetti(id, nome_album)"),
-      supabase.from("profili_artisti").select("*"),
-      supabase.from("vault_documenti").select("*").order("created_at", { ascending: false }),
-      supabase.from("vault_cartelle").select("*").order("created_at"),
-      supabase.from("tasks_kanban").select("*").order("created_at"),
-    ]);
+    try {
+      const [products, events, albums, tracks, profiles, vault, folders, tasks] = await Promise.all([
+        supabase.from("products").select("*, product_variants(*)"),
+        supabase.from("eventi_calendario").select("*").order("data_evento"),
+        supabase.from("album_progetti").select("*").order("created_at", { ascending: false }),
+        supabase.from("tracce_audio").select("*, album_progetti(id, nome_album)"),
+        supabase.from("profili_artisti").select("*"),
+        supabase.from("vault_documenti").select("*").order("created_at", { ascending: false }),
+        supabase.from("vault_cartelle").select("*").order("created_at"),
+        supabase.from("tasks_kanban").select("*").order("created_at"),
+      ]);
 
-    void userId;
+      void userId;
 
-    setState({
-      products: (products.data ?? []) as Product[],
-      events: (events.data ?? []) as CalendarEvent[],
-      albums: (albums.data ?? []) as Album[],
-      tracks: (tracks.data ?? []) as Track[],
-      profiles: (profiles.data ?? []) as ArtistProfile[],
-      vault: (vault.data ?? []) as VaultFile[],
-      folders: (folders.data ?? []) as VaultFolder[],
-      tasks: (tasks.data ?? []) as KanbanTask[],
-    });
-
-    setDataLoading(false);
+      setState({
+        products: (products.data ?? []) as Product[],
+        events: (events.data ?? []) as CalendarEvent[],
+        albums: (albums.data ?? []) as Album[],
+        tracks: (tracks.data ?? []) as Track[],
+        profiles: (profiles.data ?? []) as ArtistProfile[],
+        vault: (vault.data ?? []) as VaultFile[],
+        folders: (folders.data ?? []) as VaultFolder[],
+        tasks: (tasks.data ?? []) as KanbanTask[],
+      });
+    } finally {
+      setDataLoading(false);
+    }
   }
 
   async function handleLogin(email: string, password: string) {
@@ -1757,28 +1759,31 @@ function Metric({ title, value, tone }: { title: string; value: string; tone: "o
     if (!isNumeric || hasAnimated) return;
     const el = ref.current;
     if (!el) return;
+    let rafId = 0;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry.isIntersecting) return;
         observer.disconnect();
         setHasAnimated(true);
-
         const duration = 700;
         const start = performance.now();
         function frame(now: number) {
           const progress = Math.min((now - start) / duration, 1);
           const eased = 1 - Math.pow(1 - progress, 3);
           setDisplayed(Math.round(eased * numericValue));
-          if (progress < 1) requestAnimationFrame(frame);
+          if (progress < 1) rafId = requestAnimationFrame(frame);
         }
-        requestAnimationFrame(frame);
+        rafId = requestAnimationFrame(frame);
       },
       { threshold: 0.5 }
     );
 
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(rafId);
+    };
   }, [numericValue, isNumeric, hasAnimated]);
 
   const displayValue = isNumeric ? String(displayed) : value;

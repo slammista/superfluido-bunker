@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
 type Side = "top" | "bottom" | "left" | "right";
@@ -27,11 +27,13 @@ export function Tooltip({
   content: string;
   side?: Side;
 }) {
+  const id = useId();
   const [visible, setVisible] = useState(false);
 
   return (
     <div
       className="relative inline-flex"
+      aria-describedby={id}
       onMouseEnter={() => setVisible(true)}
       onMouseLeave={() => setVisible(false)}
       onFocus={() => setVisible(true)}
@@ -41,6 +43,7 @@ export function Tooltip({
       <AnimatePresence>
         {visible && (
           <motion.div
+            id={id}
             role="tooltip"
             initial={{ opacity: 0, ...enterOffset[side] }}
             animate={{ opacity: 1, y: 0, x: 0 }}

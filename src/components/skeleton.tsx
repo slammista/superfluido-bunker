@@ -1,3 +1,5 @@
+"use client";
+
 export function SkeletonCard({ rows = 3, className = "" }: { rows?: number; className?: string }) {
   return (
     <div className={`glass rounded-lg p-5 ${className}`}>
