@@ -1644,32 +1644,51 @@ function AIChatPanel({
 function Metric({ title, value, tone }: { title: string; value: string; tone: "orange" | "red" | "blue" | "green" }) {
   const numericValue = parseInt(value, 10);
   const isNumeric = !isNaN(numericValue);
-  const [displayed, setDisplayed] = useState(isNumeric ? 0 : null);
+  const [displayed, setDisplayed] = useState(0);
+  const [hasAnimated, setHasAnimated] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isNumeric) return;
-    const start = performance.now();
-    const duration = 800;
-    function frame(now: number) {
-      const progress = Math.min((now - start) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplayed(Math.round(eased * numericValue));
-      if (progress < 1) requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-  }, [numericValue, isNumeric]);
+    if (!isNumeric || hasAnimated) return;
+    const el = ref.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        observer.disconnect();
+        setHasAnimated(true);
+
+        const duration = 700;
+        const start = performance.now();
+        function frame(now: number) {
+          const progress = Math.min((now - start) / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          setDisplayed(Math.round(eased * numericValue));
+          if (progress < 1) requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      },
+      { threshold: 0.5 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [numericValue, isNumeric, hasAnimated]);
 
   const displayValue = isNumeric ? String(displayed) : value;
+
   const tones = {
     orange: "text-orange-200 bg-orange-500/12 border-orange-400/25",
-    red: "text-red-200 bg-red-500/10 border-red-400/25",
-    blue: "text-sky-200 bg-sky-500/10 border-sky-400/25",
-    green: "text-emerald-200 bg-emerald-500/10 border-emerald-400/25",
+    red:    "text-red-200 bg-red-500/10 border-red-400/25",
+    blue:   "text-sky-200 bg-sky-500/10 border-sky-400/25",
+    green:  "text-emerald-200 bg-emerald-500/10 border-emerald-400/25",
   };
+
   return (
-    <div className={`rounded-md border p-5 ${tones[tone]}`}>
+    <div ref={ref} className={`rounded-lg border p-5 ${tones[tone]}`}>
       <p className="text-xs font-bold uppercase tracking-[0.16em] opacity-65">{title}</p>
-      <p className="mt-3 font-mono text-4xl font-black">{displayValue}</p>
+      <p className="mt-3 font-mono text-4xl font-black tabular-nums">{displayValue}</p>
     </div>
   );
 }
