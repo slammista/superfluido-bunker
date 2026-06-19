@@ -701,112 +701,91 @@ function LoginScreen({
   }
 
   return (
-    <main className="flex min-h-screen flex-col lg:flex-row">
+    <main className="flex min-h-screen items-center justify-center px-4 py-10">
       {/* Background */}
       <div className="fixed inset-0 -z-10 opacity-45">
         <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
       </div>
 
-      {/* Left — Hero */}
-      <div className="flex flex-col justify-center px-8 py-10 lg:flex-1 lg:px-16 lg:py-20">
-        {/* Logo */}
-        <div className={`w-full max-w-[340px] ${prefersReduced ? "" : "glitch-once"}`}>
+      <form onSubmit={submit} className="glass w-full max-w-md rounded-xl p-8">
+        {/* Logo hero */}
+        <div className={`-mx-2 mb-6 ${prefersReduced ? "" : "glitch-once"}`}>
           <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-auto w-full object-contain" priority />
         </div>
 
-        {/* Brand copy */}
-        <div className="mt-8 hidden lg:block">
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-orange-400/80">Operating System</p>
-          <h1 className="mt-2 text-4xl font-black tracking-tight text-white xl:text-5xl">
-            SUPERFLUIDO<br />BUNKER
-          </h1>
-          <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/45">
-            Dashboard operativa per collettivi musicali, label indipendenti e studio hub.
-          </p>
-
-          {/* Feature pills */}
-          <ul className="mt-8 space-y-3">
-            {LANDING_FEATURES.map(({ icon: Icon, label }, i) => (
-              <motion.li
-                key={label}
-                initial={{ opacity: 0, x: prefersReduced ? 0 : -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: prefersReduced ? 0 : 0.4, delay: prefersReduced ? 0 : 0.2 + i * 0.08, ease: [0.16, 1, 0.3, 1] }}
-                className="flex items-center gap-3 text-sm text-white/60"
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-orange-400/20 bg-orange-500/10 text-orange-300">
-                  <Icon size={14} />
-                </span>
-                {label}
-              </motion.li>
-            ))}
-          </ul>
+        {/* Feature pills */}
+        <div className="flex flex-wrap justify-center gap-x-5 gap-y-1.5">
+          {LANDING_FEATURES.map(({ icon: Icon, label }, i) => (
+            <motion.span
+              key={label}
+              initial={{ opacity: 0, y: prefersReduced ? 0 : 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: prefersReduced ? 0 : 0.35, delay: prefersReduced ? 0 : i * 0.07, ease: [0.16, 1, 0.3, 1] }}
+              className="flex items-center gap-1.5 text-[11px] text-white/40"
+            >
+              <Icon size={11} className="text-orange-400/60" />
+              {label}
+            </motion.span>
+          ))}
         </div>
-      </div>
 
-      {/* Right — Form */}
-      <div className="flex items-center justify-center px-4 py-8 lg:w-[480px] lg:py-20">
-        <form onSubmit={submit} className="glass w-full max-w-md rounded-md p-7">
-          {/* Mobile logo (hidden on desktop — shown in left col) */}
-          <div className="mx-auto mb-6 h-20 w-44 lg:hidden">
-            <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-full w-full object-contain" priority />
-          </div>
+        <div className="mt-5 border-t border-white/10" />
 
-          <h2 className="text-center text-2xl font-black tracking-tight text-white">
-            {mode === "login" ? "Bunker Login" : mode === "signup" ? "Crea Account" : "Reset Password"}
-          </h2>
-          <p className="mt-2 text-center text-sm text-white/55">
-            {mode === "login"
-              ? "Accesso operativo a magazzino, studio, calendario e AI press kit."
-              : mode === "signup"
-              ? "Crea il tuo account per accedere al Bunker."
-              : "Inserisci la tua email e ti mandiamo il link per reimpostare la password."}
-          </p>
+        {/* Form */}
+        <h2 className="mt-5 text-center text-xl font-black tracking-tight text-white">
+          {mode === "login" ? "Bunker Login" : mode === "signup" ? "Crea Account" : "Reset Password"}
+        </h2>
+        <p className="mt-1.5 text-center text-sm text-white/45">
+          {mode === "login"
+            ? "Accesso operativo a magazzino, studio, calendario e AI press kit."
+            : mode === "signup"
+            ? "Crea il tuo account per accedere al Bunker."
+            : "Inserisci la tua email e ti mandiamo il link per reimpostare la password."}
+        </p>
 
-          {notice ? <Notice text={notice} /> : null}
+        {notice ? <Notice text={notice} /> : null}
 
-          <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
-          <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" type="email" required />
+        <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
+        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" type="email" required />
 
-          {mode !== "reset" && (
+        {mode !== "reset" && (
+          <>
+            <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
+            <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
+          </>
+        )}
+
+        <button
+          disabled={loading}
+          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
+          {mode === "login" ? "Entra" : mode === "signup" ? "Crea Account" : "Invia link di reset"}
+        </button>
+
+        <div className="mt-5 flex flex-col items-center gap-2 text-center">
+          {mode === "login" && (
             <>
-              <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
-              <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
+              <button type="button" onClick={() => setMode("signup")} className="text-sm text-white/50 transition hover:text-orange-300">
+                Non hai un account? <span className="font-bold text-orange-400">Registrati</span>
+              </button>
+              <button type="button" onClick={() => setMode("reset")} className="text-xs text-white/30 transition hover:text-white/60">
+                Password dimenticata?
+              </button>
             </>
           )}
-
-          <button
-            disabled={loading}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
-            {mode === "login" ? "Entra" : mode === "signup" ? "Crea Account" : "Invia link di reset"}
-          </button>
-
-          <div className="mt-5 flex flex-col items-center gap-2 text-center">
-            {mode === "login" && (
-              <>
-                <button type="button" onClick={() => setMode("signup")} className="text-sm text-white/50 transition hover:text-orange-300">
-                  Non hai un account? <span className="font-bold text-orange-400">Registrati</span>
-                </button>
-                <button type="button" onClick={() => setMode("reset")} className="text-xs text-white/30 transition hover:text-white/60">
-                  Password dimenticata?
-                </button>
-              </>
-            )}
-            {mode === "signup" && (
-              <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
-                Hai già un account? <span className="font-bold text-orange-400">Accedi</span>
-              </button>
-            )}
-            {mode === "reset" && (
-              <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
-                ← Torna al login
-              </button>
-            )}
-          </div>
-        </form>
-      </div>
+          {mode === "signup" && (
+            <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
+              Hai già un account? <span className="font-bold text-orange-400">Accedi</span>
+            </button>
+          )}
+          {mode === "reset" && (
+            <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
+              ← Torna al login
+            </button>
+          )}
+        </div>
+      </form>
     </main>
   );
 }
