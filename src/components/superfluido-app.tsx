@@ -701,26 +701,31 @@ function LoginScreen({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-10">
+    <main className="flex min-h-screen items-center justify-center px-4 py-4">
       {/* Background */}
       <div className="fixed inset-0 -z-10 opacity-45">
         <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
       </div>
 
-      <form onSubmit={submit} className="glass w-full max-w-md rounded-xl p-8">
-        {/* Logo hero */}
-        <div className={`-mx-2 mb-6 ${prefersReduced ? "" : "glitch-once"}`}>
-          <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-auto w-full object-contain" priority />
+      <form onSubmit={submit} className="glass w-full max-w-sm rounded-2xl p-6">
+        {/* 3D spinning globe — keychain effect */}
+        <div
+          className="relative mx-auto mb-4 h-36 w-36 rounded-full ring-1 ring-orange-500/20"
+          style={{ perspective: "700px" }}
+        >
+          <div className={`relative h-full w-full ${prefersReduced ? "glitch-once" : "logo-3d-spin"}`}>
+            <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" fill className="object-contain" priority />
+          </div>
         </div>
 
         {/* Feature pills */}
-        <div className="flex flex-wrap justify-center gap-x-5 gap-y-1.5">
+        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mb-4">
           {LANDING_FEATURES.map(({ icon: Icon, label }, i) => (
             <motion.span
               key={label}
-              initial={{ opacity: 0, y: prefersReduced ? 0 : 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: prefersReduced ? 0 : 0.35, delay: prefersReduced ? 0 : i * 0.07, ease: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: prefersReduced ? 0 : 0.4, delay: prefersReduced ? 0 : 0.4 + i * 0.08 }}
               className="flex items-center gap-1.5 text-[11px] text-white/40"
             >
               <Icon size={11} className="text-orange-400/60" />
@@ -729,41 +734,40 @@ function LoginScreen({
           ))}
         </div>
 
-        <div className="mt-5 border-t border-white/10" />
+        <div className="border-t border-white/10 mb-4" />
 
-        {/* Form */}
-        <h2 className="mt-5 text-center text-xl font-black tracking-tight text-white">
+        {/* Form heading */}
+        <h2 className="text-center text-xl font-black tracking-tight text-white">
           {mode === "login" ? "Bunker Login" : mode === "signup" ? "Crea Account" : "Reset Password"}
         </h2>
-        <p className="mt-1.5 text-center text-sm text-white/45">
-          {mode === "login"
-            ? "Accesso operativo a magazzino, studio, calendario e AI press kit."
-            : mode === "signup"
-            ? "Crea il tuo account per accedere al Bunker."
-            : "Inserisci la tua email e ti mandiamo il link per reimpostare la password."}
-        </p>
+
+        {mode === "reset" && (
+          <p className="mt-1 text-center text-xs text-white/40">
+            Ti mandiamo il link per reimpostare la password.
+          </p>
+        )}
 
         {notice ? <Notice text={notice} /> : null}
 
-        <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" type="email" required />
+        <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
+        <input className="field mt-1.5 rounded-md px-3.5 py-2.5" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" type="email" required />
 
         {mode !== "reset" && (
           <>
-            <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
-            <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
+            <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
+            <input className="field mt-1.5 rounded-md px-3.5 py-2.5" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
           </>
         )}
 
         <button
           disabled={loading}
-          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2.5 text-sm font-black text-black transition hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
           {mode === "login" ? "Entra" : mode === "signup" ? "Crea Account" : "Invia link di reset"}
         </button>
 
-        <div className="mt-5 flex flex-col items-center gap-2 text-center">
+        <div className="mt-4 flex flex-col items-center gap-1.5 text-center">
           {mode === "login" && (
             <>
               <button type="button" onClick={() => setMode("signup")} className="text-sm text-white/50 transition hover:text-orange-300">
