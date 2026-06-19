@@ -44,7 +44,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { getSupabase } from "@/lib/supabase";
 import { sampleAlbums, sampleEvents, sampleProducts, sampleProfiles, sampleTracks, sampleVault } from "@/lib/sample-data";
 import type { Album, ArtistProfile, CalendarEvent, KanbanTask, Product, Role, Track, VaultFile, VaultFolder } from "@/lib/types";
-import { SkeletonCard, SkeletonRow, SkeletonMetric } from "@/components/skeleton";
+import { SkeletonMetric } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
 import { CommandPalette } from "@/components/command-palette";
 import { CircuitHud } from "@/components/circuit-hud";
@@ -132,10 +132,11 @@ function useMagnetic(strength = 0.3) {
       el!.style.transform = `translate(${dx}px, ${dy}px)`;
     }
 
+    let timeoutId: ReturnType<typeof setTimeout>;
     function handleLeave() {
       el!.style.transform = "";
       el!.style.transition = "transform 0.4s cubic-bezier(0.16,1,0.3,1)";
-      setTimeout(() => { el!.style.transition = ""; }, 400);
+      timeoutId = setTimeout(() => { el!.style.transition = ""; }, 400);
     }
 
     el.addEventListener("mousemove", handleMove);
@@ -143,6 +144,7 @@ function useMagnetic(strength = 0.3) {
     return () => {
       el.removeEventListener("mousemove", handleMove);
       el.removeEventListener("mouseleave", handleLeave);
+      clearTimeout(timeoutId);
     };
   }, [strength]);
 
@@ -662,7 +664,13 @@ function UserMenu({
   );
 }
 
-// FIX 2: LoginScreen con toggle login/signup
+const LANDING_FEATURES = [
+  { icon: Disc3,    label: "Studio Hub & Release" },
+  { icon: Package,  label: "Magazzino & Merch" },
+  { icon: Sparkles, label: "AI Press Kit" },
+  { icon: Radio,    label: "Real-time Collaboration" },
+];
+
 function LoginScreen({
   loading,
   notice,
@@ -679,6 +687,7 @@ function LoginScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
+  const prefersReduced = useReducedMotion();
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -692,68 +701,112 @@ function LoginScreen({
   }
 
   return (
-    <main className="grid min-h-screen place-items-center px-4 py-10">
+    <main className="flex min-h-screen flex-col lg:flex-row">
+      {/* Background */}
       <div className="fixed inset-0 -z-10 opacity-45">
         <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
       </div>
-      <form onSubmit={submit} className="glass w-full max-w-md rounded-md p-7">
-        <div className="mx-auto mb-8 h-28 w-52">
-          <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-full w-full object-contain" priority />
+
+      {/* Left — Hero */}
+      <div className="flex flex-col justify-center px-8 py-10 lg:flex-1 lg:px-16 lg:py-20">
+        {/* Logo */}
+        <div className={`w-full max-w-[340px] ${prefersReduced ? "" : "glitch-once"}`}>
+          <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-auto w-full object-contain" priority />
         </div>
-        <h1 className="text-center text-2xl font-black tracking-tight text-white">
-          {mode === "login" ? "Bunker Login" : mode === "signup" ? "Crea Account" : "Reset Password"}
-        </h1>
-        <p className="mt-2 text-center text-sm text-white/55">
-          {mode === "login"
-            ? "Accesso operativo a magazzino, studio, calendario e AI press kit."
-            : mode === "signup"
-            ? "Crea il tuo account per accedere al Bunker."
-            : "Inserisci la tua email e ti mandiamo il link per reimpostare la password."}
-        </p>
 
-        {notice ? <Notice text={notice} /> : null}
+        {/* Brand copy */}
+        <div className="mt-8 hidden lg:block">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-orange-400/80">Operating System</p>
+          <h1 className="mt-2 text-4xl font-black tracking-tight text-white xl:text-5xl">
+            SUPERFLUIDO<br />BUNKER
+          </h1>
+          <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/45">
+            Dashboard operativa per collettivi musicali, label indipendenti e studio hub.
+          </p>
 
-        <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
-        <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" type="email" required />
+          {/* Feature pills */}
+          <ul className="mt-8 space-y-3">
+            {LANDING_FEATURES.map(({ icon: Icon, label }, i) => (
+              <motion.li
+                key={label}
+                initial={{ opacity: 0, x: prefersReduced ? 0 : -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: prefersReduced ? 0 : 0.4, delay: prefersReduced ? 0 : 0.2 + i * 0.08, ease: [0.16, 1, 0.3, 1] }}
+                className="flex items-center gap-3 text-sm text-white/60"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-orange-400/20 bg-orange-500/10 text-orange-300">
+                  <Icon size={14} />
+                </span>
+                {label}
+              </motion.li>
+            ))}
+          </ul>
+        </div>
+      </div>
 
-        {mode !== "reset" && (
-          <>
-            <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
-            <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
-          </>
-        )}
+      {/* Right — Form */}
+      <div className="flex items-center justify-center px-4 py-8 lg:w-[480px] lg:py-20">
+        <form onSubmit={submit} className="glass w-full max-w-md rounded-md p-7">
+          {/* Mobile logo (hidden on desktop — shown in left col) */}
+          <div className="mx-auto mb-6 h-20 w-44 lg:hidden">
+            <Image src="/assets/logo_login.png" alt="SUPERFLUIDO" width={420} height={220} className="h-full w-full object-contain" priority />
+          </div>
 
-        <button
-          disabled={loading}
-          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
-          {mode === "login" ? "Entra" : mode === "signup" ? "Crea Account" : "Invia link di reset"}
-        </button>
+          <h2 className="text-center text-2xl font-black tracking-tight text-white">
+            {mode === "login" ? "Bunker Login" : mode === "signup" ? "Crea Account" : "Reset Password"}
+          </h2>
+          <p className="mt-2 text-center text-sm text-white/55">
+            {mode === "login"
+              ? "Accesso operativo a magazzino, studio, calendario e AI press kit."
+              : mode === "signup"
+              ? "Crea il tuo account per accedere al Bunker."
+              : "Inserisci la tua email e ti mandiamo il link per reimpostare la password."}
+          </p>
 
-        <div className="mt-5 flex flex-col items-center gap-2 text-center">
-          {mode === "login" && (
+          {notice ? <Notice text={notice} /> : null}
+
+          <label className="mt-6 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Email</label>
+          <input className="field mt-2 rounded-md px-4 py-3" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="utente@superfluido.it" type="email" required />
+
+          {mode !== "reset" && (
             <>
-              <button type="button" onClick={() => setMode("signup")} className="text-sm text-white/50 transition hover:text-orange-300">
-                Non hai un account? <span className="font-bold text-orange-400">Registrati</span>
-              </button>
-              <button type="button" onClick={() => setMode("reset")} className="text-xs text-white/30 transition hover:text-white/60">
-                Password dimenticata?
-              </button>
+              <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-white/50">Password</label>
+              <input className="field mt-2 rounded-md px-4 py-3" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
             </>
           )}
-          {mode === "signup" && (
-            <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
-              Hai già un account? <span className="font-bold text-orange-400">Accedi</span>
-            </button>
-          )}
-          {mode === "reset" && (
-            <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
-              ← Torna al login
-            </button>
-          )}
-        </div>
-      </form>
+
+          <button
+            disabled={loading}
+            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-4 py-3 text-sm font-black text-black transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <ChevronRight size={18} />}
+            {mode === "login" ? "Entra" : mode === "signup" ? "Crea Account" : "Invia link di reset"}
+          </button>
+
+          <div className="mt-5 flex flex-col items-center gap-2 text-center">
+            {mode === "login" && (
+              <>
+                <button type="button" onClick={() => setMode("signup")} className="text-sm text-white/50 transition hover:text-orange-300">
+                  Non hai un account? <span className="font-bold text-orange-400">Registrati</span>
+                </button>
+                <button type="button" onClick={() => setMode("reset")} className="text-xs text-white/30 transition hover:text-white/60">
+                  Password dimenticata?
+                </button>
+              </>
+            )}
+            {mode === "signup" && (
+              <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
+                Hai già un account? <span className="font-bold text-orange-400">Accedi</span>
+              </button>
+            )}
+            {mode === "reset" && (
+              <button type="button" onClick={() => setMode("login")} className="text-sm text-white/50 transition hover:text-orange-300">
+                ← Torna al login
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
     </main>
   );
 }
@@ -780,7 +833,7 @@ function PasswordRecoveryScreen({
   }
 
   return (
-    <main className="grid min-h-screen place-items-center px-4 py-10">
+    <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="fixed inset-0 -z-10 opacity-45">
         <Image src="/assets/background_main.png" alt="" fill priority className="object-cover" />
       </div>
@@ -882,6 +935,7 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
   const aiChatBtnRef = useMagnetic(0.25);
   const studioBtnRef = useMagnetic(0.25);
   const [activityFeed, setActivityFeed] = useState<Array<{ id: string; text: string; time: Date }>>([]);
+  const prefersReducedMotion = useReducedMotion();
 
   const totalStock = state.products.reduce(
     (sum, product) => sum + (product.product_variants ?? []).reduce((variantSum, variant) => variantSum + Number(variant.stock_quantity ?? 0), 0),
@@ -1117,7 +1171,7 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
       {/* Activity Feed */}
       {activityFeed.length > 0 && (
         <motion.section
-          initial={{ opacity: 0, height: 0 }}
+          initial={{ opacity: 0, height: prefersReducedMotion ? "auto" : 0 }}
           animate={{ opacity: 1, height: "auto" }}
           className="mt-3 overflow-hidden"
         >
@@ -1130,9 +1184,9 @@ function Overview({ state, user, goTo, onToast, reload, dataLoading = false }: {
               {activityFeed.map((item) => (
                 <motion.span
                   key={item.id}
-                  initial={{ opacity: 0, x: 12 }}
+                  initial={{ opacity: 0, x: prefersReducedMotion ? 0 : 12 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.2 }}
+                  transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
                   className="shrink-0 text-xs text-white/55"
                 >
                   <span className="mr-1.5 text-orange-300/60">●</span>

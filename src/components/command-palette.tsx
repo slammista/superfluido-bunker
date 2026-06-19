@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { Command } from "cmdk";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Home, Package, CalendarDays, Disc3, Radio, UserRound, FolderOpen,
   Plus, Sparkles, Search,
@@ -37,6 +37,7 @@ const GROUP_HEADING_CLS = "[&_[cmdk-group-heading]]:mb-1 [&_[cmdk-group-heading]
 
 export function CommandPalette({ open, onClose, onNavigate, onAction }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const prefersReduced = useReducedMotion();
 
   useEffect(() => {
     if (open) requestAnimationFrame(() => inputRef.current?.focus());
@@ -77,10 +78,10 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }: CommandP
 
           {/* Panel */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: -8 }}
+            initial={{ opacity: 0, ...(prefersReduced ? {} : { scale: 0.96, y: -8 }) }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: -8 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            exit={{ opacity: 0, ...(prefersReduced ? {} : { scale: 0.96, y: -8 }) }}
+            transition={{ duration: prefersReduced ? 0 : 0.18, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-[18%] z-[301] w-full max-w-xl -translate-x-1/2 px-4"
           >
             <Command

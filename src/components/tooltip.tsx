@@ -1,6 +1,6 @@
 "use client";
 import { useId, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 type Side = "top" | "bottom" | "left" | "right";
 
@@ -29,6 +29,7 @@ export function Tooltip({
 }) {
   const id = useId();
   const [visible, setVisible] = useState(false);
+  const prefersReduced = useReducedMotion();
 
   return (
     <div
@@ -45,10 +46,10 @@ export function Tooltip({
           <motion.div
             id={id}
             role="tooltip"
-            initial={{ opacity: 0, ...enterOffset[side] }}
+            initial={{ opacity: 0, ...(prefersReduced ? {} : enterOffset[side]) }}
             animate={{ opacity: 1, y: 0, x: 0 }}
-            exit={{ opacity: 0, ...enterOffset[side] }}
-            transition={{ duration: 0.12, ease: "easeOut" }}
+            exit={{ opacity: 0, ...(prefersReduced ? {} : enterOffset[side]) }}
+            transition={{ duration: prefersReduced ? 0 : 0.12, ease: "easeOut" }}
             className={`pointer-events-none absolute z-[200] whitespace-nowrap rounded-md border border-white/10 bg-[#1c1c1c] px-2.5 py-1.5 text-xs font-semibold text-white shadow-xl ${pos[side]}`}
           >
             {content}
